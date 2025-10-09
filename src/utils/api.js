@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE_URL = 'http://localhost:8000'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -72,8 +72,49 @@ export const checkServerHealth = async () => {
   try {
     const response = await api.get('/')
     return response.data
-  } catch (error) {
+  } catch {
     throw new Error('Server is not responding')
+  }
+}
+
+// Email functions
+export const sendEmail = async (emailData) => {
+  try {
+    const response = await api.post('/send-email', emailData)
+    return response.data
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.detail || 
+      error.message || 
+      'Failed to send email'
+    )
+  }
+}
+
+// OTP functions
+export const sendOtp = async (email) => {
+  try {
+    const response = await api.post('/send-otp', { email })
+    return response.data
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.message || 
+      error.message || 
+      'Failed to send OTP'
+    )
+  }
+}
+
+export const verifyOtp = async (email, otp) => {
+  try {
+    const response = await api.post('/verify-otp', { email, otp })
+    return response.data
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.message || 
+      error.message || 
+      'Failed to verify OTP'
+    )
   }
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { Menu, X, Heart, Activity, Users, Mail, BarChart3 } from 'lucide-react'
+import { Menu, X, Heart, Activity, Users, Mail, BarChart3, Shield, Building2, User } from 'lucide-react'
 
 const Navbar = () => {
   const [isOpen, setIsOpen] = useState(false)
@@ -12,6 +12,12 @@ const Navbar = () => {
     { name: 'About', path: '/about', icon: Users },
     { name: 'Upload', path: '/upload', icon: Activity },
     { name: 'Accuracy', path: '/about', icon: BarChart3 },
+  ]
+
+  const loginItems = [
+    { name: 'Admin', path: '/admin-login', icon: Shield },
+    { name: 'Hospital', path: '/hospital-login', icon: Building2 },
+    { name: 'Patient', path: '/patient-login', icon: User },
   ]
 
   return (
@@ -60,13 +66,29 @@ const Navbar = () => {
                 </Link>
               )
             })}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-2 rounded-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200"
-            >
-              Get Started
-            </motion.button>
+            <div className="flex items-center space-x-4">
+              {loginItems.map((item) => {
+                const Icon = item.icon
+                return (
+                  <Link
+                    key={item.name}
+                    to={item.path}
+                    className="flex items-center space-x-1 px-3 py-2 text-sm text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200"
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{item.name}</span>
+                  </Link>
+                )
+              })}
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => window.location.href = '/upload'}
+                className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-2 rounded-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200"
+              >
+                Get Started
+              </motion.button>
+            </div>
           </div>
 
           {/* Mobile menu button */}
@@ -108,13 +130,33 @@ const Navbar = () => {
                   </Link>
                 )
               })}
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                className="w-full mt-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-lg font-medium shadow-lg"
-              >
-                Get Started
-              </motion.button>
+              <div className="mt-4 space-y-2">
+                {loginItems.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.name}
+                      to={item.path}
+                      onClick={() => setIsOpen(false)}
+                      className="flex items-center space-x-3 px-3 py-2 text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200"
+                    >
+                      <Icon className="w-5 h-5" />
+                      <span>{item.name} Login</span>
+                    </Link>
+                  )
+                })}
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => {
+                    setIsOpen(false)
+                    window.location.href = '/upload'
+                  }}
+                  className="w-full mt-4 bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-6 py-3 rounded-lg font-medium shadow-lg"
+                >
+                  Get Started
+                </motion.button>
+              </div>
             </div>
           </motion.div>
         )}
