@@ -1,4 +1,7 @@
 import { motion } from 'framer-motion'
+import sakshi from '../assets/DeveloperSection/sakshi.jpg'
+import pranjal from '../assets/DeveloperSection/pranjal.png'
+import pratiksha from '../assets/DeveloperSection/pratiksha.jpg'
 import { 
   Brain, 
   Target, 
@@ -274,6 +277,72 @@ const About = () => {
               >
                 <h3 className="text-lg font-semibold text-gray-800 mb-2">{tech.name}</h3>
                 <p className="text-gray-600 text-sm">{tech.description}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Developers Section */}
+      <section className="py-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <motion.div
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8 }}
+            className="text-center mb-16"
+          >
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">
+              Meet Our Developers
+            </h2>
+            <p className="text-xl text-gray-600 max-w-3xl mx-auto">
+              The brilliant minds behind BioPrint AI, dedicated to revolutionizing healthcare through technology
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {[
+              {
+                name: "Pranjal",
+                role: "Backend Developer",
+                about: "Fourth year ENTC student at JSPM college wagholi. Passionate about deep learning and computer vision. Specializes in neural network architecture design. FastAPI and Python enthusiast.",
+                image: pranjal
+              },
+              {
+                name: "Sakshi",
+                role: "Frontend Developer",
+                about: "Fourth year ENTC student at JSPM college wagholi. Expert in React and Python development. Focuses on creating seamless user experiences.",
+                image: sakshi
+              },
+              {
+                name: "Pratiksha",
+                role: "Firebase Manager",
+                about: "Fourth year ENTC student at JSPM college wagholi. Expert in Firebase and database management. Focuses on creating secure and scalable systems.",
+                image: pratiksha
+              }
+            ].map((developer, index) => (
+              <motion.div
+                key={index}
+                initial={{ opacity: 0, y: 30 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.6, delay: index * 0.2 }}
+                whileHover={{ y: -10, scale: 1.02 }}
+                className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-all duration-300 text-center"
+              >
+                <div className="relative mb-6">
+                  <img
+                    src={developer.image}
+                    alt={developer.name}
+                    className="w-32 h-32 rounded-full mx-auto object-cover shadow-lg"
+                  />
+                </div>
+                <h3 className="text-2xl font-bold text-gray-800 mb-2">{developer.name}</h3>
+                <div className="inline-block bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-4 py-2 rounded-full text-sm font-semibold mb-4">
+                  {developer.role}
+                </div>
+                <p className="text-gray-600 leading-relaxed">
+                  {developer.about}
+                </p>
               </motion.div>
             ))}
           </div>
