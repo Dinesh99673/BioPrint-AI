@@ -1,133 +1,61 @@
-graph TB
-    %% User Interfaces
-    subgraph "Frontend - React + Vite + Tailwind"
-        A[Landing Page] --> B[User Selection]
-        B --> C[Admin Portal]
-        B --> D[Hospital Portal] 
-        B --> E[Patient Portal]
-        B --> F[Public Fingerprint Upload]
-    end
+---
+config:
+  layout: elk
+---
+flowchart TB
+ subgraph Frontend["Frontend"]
+        A["Landing / Public Upload"]
+        B["Admin Portal"]
+        C["Hospital Portal"]
+        D["Patient Portal"]
+        M["Fingerprint Interface"]
+  end
+ subgraph subGraph1["Backend (FastAPI)"]
+        E["Email Service"]
+        F["OTP Service"]
+        G["Prediction Service"]
+        N["Fingerprint Service"]
+  end
+ subgraph Firebase["Firebase"]
+        H["Auth"]
+        I["Firestore"]
+        J["Storage"]
+  end
+ subgraph Models["Models"]
+        K["VGG16"]
+        L["MobileNetV2"]
+  end
 
-    %% Admin Flow
-    subgraph "Admin Management System"
-        C --> C1[Admin Login]
-        C1 --> C2[Admin Dashboard]
-        C2 --> C3[Hospital Registration]
-        C2 --> C4[Hospital Approval/Rejection]
-        C2 --> C5[System Logs]
-        C3 --> C6[Register New Hospital]
-        C4 --> C7[Send Approval Email]
-        C4 --> C8[Send Rejection Email]
-    end
+ subgraph Hardware["Hardware"]
+        O["R307s Sensor Module"]
+  end
 
-    %% Hospital Flow
-    subgraph "Hospital Management System"
-        D --> D1[Hospital Login]
-        D1 --> D2[Hospital Dashboard]
-        D2 --> D3[Add Patient]
-        D2 --> D4[Manage Patients]
-        D2 --> D5[Access Patient Data]
-        D2 --> D6[Emergency Override]
-        D2 --> D7[Profile Management]
-        D5 --> D8[OTP Verification]
-        D6 --> D9[Direct Access]
-    end
-
-    %% Patient Flow
-    subgraph "Patient Access System"
-        E --> E1[Patient Login - Email]
-        E1 --> E2[OTP Verification]
-        E2 --> E3[Patient Dashboard - Read Only]
-    end
-
-    %% Public Flow
-    subgraph "Public Fingerprint System"
-        F --> F1[Upload Fingerprint]
-        F1 --> F2[Blood Group Prediction]
-        F2 --> F3[Display Results]
-    end
-
-    %% Backend Services
-    subgraph "Backend - FastAPI"
-        G[Email Service] --> G1[Send Registration Email]
-        G --> G2[Send Approval Email]
-        G --> G3[Send Rejection Email]
-        G --> G4[Send OTP Email]
-        
-        H[OTP Service] --> H1[Generate OTP]
-        H --> H2[Verify OTP]
-        H --> H3[Cleanup Expired OTPs]
-        
-        I[ML Prediction Service] --> I1[Load VGG16 Model]
-        I --> I2[Load MobileNetV2 Model]
-        I --> I3[Process Fingerprint Image]
-        I --> I4[Generate Prediction]
-        I --> I5[Return Results]
-    end
-
-    %% Database & Auth
-    subgraph "Firebase Services"
-        J[Firebase Authentication] --> J1[Admin Auth]
-        J --> J2[Hospital Auth]
-        J --> J3[Password Management]
-        
-        K[Firestore Database] --> K1[Admin Collection]
-        K --> K2[Hospital Collection]
-        K --> K3[Patient Collection]
-        K --> K4[Logs Collection]
-        
-        L[Firebase Storage] --> L1[Fingerprint Images]
-        L --> L2[Patient Documents]
-    end
-
-    %% ML Models
-    subgraph "Machine Learning Models"
-        M[VGG16 Model] --> M1[Deep CNN Architecture]
-        M --> M2[High Accuracy Predictions]
-        
-        N[MobileNetV2 Model] --> N1[Lightweight Architecture]
-        N --> N2[Fast Predictions]
-        
-        O[Ensemble Prediction] --> O1[Combine Both Models]
-        O --> O2[Final Blood Group Result]
-    end
-
-    %% Connections
-    C6 --> G1
-    C7 --> G2
-    C8 --> G3
-    D8 --> H1
-    E2 --> H2
-    F1 --> I3
-    I3 --> M1
-    I3 --> N1
-    M2 --> O1
-    N2 --> O1
-    O2 --> F3
-
-    %% Firebase Connections
-    C2 --> K1
-    C3 --> K2
-    D3 --> K3
-    D5 --> K3
-    D6 --> K3
-    C5 --> K4
-    D2 --> J2
-    C1 --> J1
-
-    %% Styling
+    A --> G
+    B --> I & E & H
+    C --> I & F & H
+    D --> I & F & H
+    G --> K & L
+    I --> J
+    M --> N
+    N --> O
+     A:::frontend
+     B:::frontend
+     C:::frontend
+     D:::frontend
+     M:::frontend
+     E:::backend
+     F:::backend
+     G:::backend
+     N:::backend
+     H:::database
+     I:::database
+     J:::database
+     K:::ml
+     L:::ml
+     O:::hardware
     classDef frontend fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     classDef backend fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
     classDef database fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px
     classDef ml fill:#fff3e0,stroke:#e65100,stroke-width:2px
-    classDef admin fill:#ffebee,stroke:#c62828,stroke-width:2px
-    classDef hospital fill:#e3f2fd,stroke:#1565c0,stroke-width:2px
-    classDef patient fill:#f1f8e9,stroke:#33691e,stroke-width:2px
+    classDef hardware fill:#bbdefb,stroke:#1a237e,stroke-width:2px
 
-    class A,B,C,D,E,F frontend
-    class G,H,I backend
-    class J,K,L database
-    class M,N,O ml
-    class C1,C2,C3,C4,C5,C6,C7,C8 admin
-    class D1,D2,D3,D4,D5,D6,D7,D8,D9 hospital
-    class E1,E2,E3 patient

@@ -303,22 +303,22 @@ const About = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               {
-                name: "Pranjal",
+                name: "Pranjal Shinde",
                 role: "Backend Developer",
-                about: "Fourth year ENTC student at JSPM college wagholi. Passionate about deep learning and computer vision. Specializes in neural network architecture design. FastAPI and Python enthusiast.",
+                about: "B.E Final year student at JSPM'S Bhivarabai Sawant Institute of technology and Research Wagholi, Pune. Passionate about deep learning and computer vision. Specializes in neural network architecture design. FastAPI and Python enthusiast.",
                 image: pranjal
               },
               {
-                name: "Sakshi",
+                name: "Aarti Raut",
                 role: "Frontend Developer",
-                about: "Fourth year ENTC student at JSPM college wagholi. Expert in React and Python development. Focuses on creating seamless user experiences.",
-                image: sakshi
+                about: "B.E Final year student at JSPM'S Bhivarabai Sawant Institute of technology and Research Wagholi, Pune. Expert in React. Focuses on creating seamless user experiences.",
+                image: pratiksha
               },
               {
-                name: "Pratiksha",
+                name: "Sakshi Pawar",
                 role: "Firebase Manager",
-                about: "Fourth year ENTC student at JSPM college wagholi. Expert in Firebase and database management. Focuses on creating secure and scalable systems.",
-                image: pratiksha
+                about: "B.E Final year student at JSPM'S Bhivarabai Sawant Institute of technology and Research Wagholi, Pune. Expert in Firebase and database management. Focuses on creating secure and scalable systems.",
+                image: sakshi
               }
             ].map((developer, index) => (
               <motion.div
