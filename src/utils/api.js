@@ -68,6 +68,19 @@ export const predictBloodGroup = async (file) => {
   }
 }
 
+export const captureAndPredict = async () => {
+  try {
+    const response = await api.post('/capture-and-predict')
+    return response.data
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.detail || 
+      error.message || 
+      'Failed to capture fingerprint from scanner'
+    )
+  }
+}
+
 export const checkServerHealth = async () => {
   try {
     const response = await api.get('/')
@@ -114,6 +127,33 @@ export const verifyOtp = async (email, otp) => {
       error.response?.data?.message || 
       error.message || 
       'Failed to verify OTP'
+    )
+  }
+}
+
+// Fingerprint functions
+export const enrollFingerprint = async () => {
+  try {
+    const response = await api.post('/enroll-fingerprint')
+    return response.data
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.detail || 
+      error.message || 
+      'Failed to enroll fingerprint'
+    )
+  }
+}
+
+export const searchFingerprint = async () => {
+  try {
+    const response = await api.post('/search-fingerprint')
+    return response.data
+  } catch (error) {
+    throw new Error(
+      error.response?.data?.detail || 
+      error.message || 
+      'Failed to search fingerprint'
     )
   }
 }

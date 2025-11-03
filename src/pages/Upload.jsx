@@ -13,13 +13,14 @@ import {
   FileImage
 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { predictBloodGroup } from '../utils/api'
+import { predictBloodGroup, captureAndPredict } from '../utils/api'
 
 const Upload = () => {
   const [dragActive, setDragActive] = useState(false)
   const [selectedFile, setSelectedFile] = useState(null)
   const [preview, setPreview] = useState(null)
   const [isUploading, setIsUploading] = useState(false)
+  const [isCapturing, setIsCapturing] = useState(false)
   const fileInputRef = useRef(null)
   const navigate = useNavigate()
 
@@ -93,6 +94,29 @@ const Upload = () => {
       toast.error(error.message || 'Failed to connect to the server. Please try again.')
     } finally {
       setIsUploading(false)
+    }
+  }
+
+  const handleCaptureFromScanner = async () => {
+    setIsCapturing(true)
+
+    try {
+      toast.loading('Please place your finger on the scanner...', { id: 'capture' })
+      const response = await captureAndPredict()
+
+      if (response.success) {
+        toast.success('Fingerprint captured and blood group detected successfully!', { id: 'capture' })
+        // Store results in localStorage for the results page
+        localStorage.setItem('predictionResults', JSON.stringify(response))
+        navigate('/results')
+      } else {
+        toast.error('Failed to detect blood group', { id: 'capture' })
+      }
+    } catch (error) {
+      console.error('Capture error:', error)
+      toast.error(error.message || 'Failed to capture fingerprint. Please try again.', { id: 'capture' })
+    } finally {
+      setIsCapturing(false)
     }
   }
 
@@ -209,20 +233,20 @@ const Upload = () => {
             </AnimatePresence>
           </div>
 
-          {/* Upload Button */}
-          {selectedFile && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5 }}
-              className="mt-8 text-center"
-            >
+          {/* Action Buttons */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="mt-8 flex flex-col sm:flex-row gap-4 justify-center items-center"
+          >
+            {selectedFile && (
               <motion.button
                 whileHover={{ scale: 1.05, y: -2 }}
                 whileTap={{ scale: 0.95 }}
                 onClick={uploadFile}
-                disabled={isUploading}
-                className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-8 py-4 rounded-xl font-semibold text-lg shadow-xl hover:shadow-2xl transition-all duration-300 flex items-center space-x-2 mx-auto disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={isUploading || isCapturing}
+                className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white px-8 py-4 rounded-xl font-semibold text-lg shadow-xl hover:shadow-2xl transition-all duration-300 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isUploading ? (
                   <>
@@ -236,8 +260,27 @@ const Upload = () => {
                   </>
                 )}
               </motion.button>
-            </motion.div>
-          )}
+            )}
+            <motion.button
+              whileHover={{ scale: 1.05, y: -2 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={handleCaptureFromScanner}
+              disabled={isCapturing || isUploading}
+              className="bg-gradient-to-r from-green-500 to-emerald-600 text-white px-8 py-4 rounded-xl font-semibold text-lg shadow-xl hover:shadow-2xl transition-all duration-300 flex items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isCapturing ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Capturing...</span>
+                </>
+              ) : (
+                <>
+                  <Fingerprint className="w-5 h-5" />
+                  <span>Capture from Scanner</span>
+                </>
+              )}
+            </motion.button>
+          </motion.div>
         </motion.div>
 
         {/* Instructions */}

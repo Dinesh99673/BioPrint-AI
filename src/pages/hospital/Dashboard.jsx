@@ -1,17 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { 
   Users, 
   UserPlus, 
   Shield, 
-  AlertTriangle, 
   Settings,
   Eye,
   Edit,
   Trash2,
   Search,
   Phone,
-  Mail
+  Mail,
+  Fingerprint,
+  Activity
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import Sidebar from '../../components/Sidebar'
@@ -25,6 +26,7 @@ import axios from 'axios'
 import { updatePassword } from 'firebase/auth'
 import { auth } from '../../firebase/config'
 import { cleanupGeneratedPassword, isUsingGeneratedPassword, validatePassword } from '../../utils/hospitalAuth'
+import { enrollFingerprint, searchFingerprint } from '../../utils/api'
 
 const HospitalDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview')
@@ -35,13 +37,29 @@ const HospitalDashboard = () => {
   const [modalType, setModalType] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [accessForm, setAccessForm] = useState({ aadharNumber: '', email: '' })
-  const [emergencyForm, setEmergencyForm] = useState({ aadharNumber: '', email: '' })
   const [passwordForm, setPasswordForm] = useState({ 
     currentPassword: '', 
     newPassword: '', 
     confirmPassword: '' 
   })
   const [showPasswordModal, setShowPasswordModal] = useState(false)
+  const [isAddingPatient, setIsAddingPatient] = useState(false)
+  const [isUpdatingPatient, setIsUpdatingPatient] = useState(false)
+  const [isEnrollingFingerprint, setIsEnrollingFingerprint] = useState(false)
+  const [isSearchingFingerprint, setIsSearchingFingerprint] = useState(false)
+  const [fingerprintSlotNumber, setFingerprintSlotNumber] = useState(null)
+  const addPatientFormRef = useRef(null)
+  const [editForm, setEditForm] = useState({
+    patientName: '',
+    aadharNumber: '',
+    email: '',
+    mobileNumber: '',
+    bloodGroup: '',
+    anyAllergy: '',
+    anyDisease: '',
+    pastOperation: '',
+    patientPrivacyPermission: ''
+  })
   
   const { userData, createLog } = useAuth()
 
@@ -71,13 +89,15 @@ const HospitalDashboard = () => {
     }
   }
 
-  const handleAddPatient = async (patientData) => {
+  const handleAddPatient = async (patientData, formElement) => {
+    setIsAddingPatient(true)
     try {
       const patientId = Date.now().toString()
       const newPatient = {
         patientId,
         addedBy: userData.hospitalId,
         ...patientData,
+        fingerprintSlotNumber: fingerprintSlotNumber,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
       }
@@ -93,11 +113,61 @@ const HospitalDashboard = () => {
       })
 
       toast.success('Patient added successfully!')
-      setShowModal(false)
-      fetchPatients()
+      
+      // Reset form and fingerprint slot
+      if (formElement) {
+        formElement.reset()
+      }
+      setFingerprintSlotNumber(null)
+      
+      // Refresh patient list
+      await fetchPatients()
     } catch (error) {
       console.error('Error adding patient:', error)
       toast.error('Failed to add patient')
+    } finally {
+      setIsAddingPatient(false)
+    }
+  }
+
+  const handleUpdatePatient = async () => {
+    if (!selectedPatient) return
+    
+    setIsUpdatingPatient(true)
+    try {
+      const patientId = selectedPatient.patientId || selectedPatient.id
+      const updateData = {
+        patientName: editForm.patientName,
+        aadharNumber: editForm.aadharNumber,
+        email: editForm.email,
+        mobileNumber: editForm.mobileNumber,
+        bloodGroup: editForm.bloodGroup,
+        anyAllergy: editForm.anyAllergy,
+        anyDisease: editForm.anyDisease,
+        pastOperation: editForm.pastOperation,
+        patientPrivacyPermission: editForm.patientPrivacyPermission,
+        updatedAt: new Date().toISOString()
+      }
+
+      await updateDoc(doc(db, 'patient', patientId), updateData)
+      
+      // Create log entry
+      await createLog({
+        hospitalId: userData.hospitalId,
+        patientId,
+        action: 'UPDATE_PATIENT',
+        remarks: `Updated patient: ${editForm.aadharNumber}`
+      })
+
+      toast.success('Patient updated successfully!')
+      setShowModal(false)
+      setSelectedPatient(null)
+      await fetchPatients()
+    } catch (error) {
+      console.error('Error updating patient:', error)
+      toast.error('Failed to update patient')
+    } finally {
+      setIsUpdatingPatient(false)
     }
   }
 
@@ -126,36 +196,72 @@ const HospitalDashboard = () => {
     }
   }
 
-  const handleEmergencyOverride = async (formData) => {
+  const handleEnrollFingerprint = async () => {
+    setIsEnrollingFingerprint(true)
     try {
-      // Find patient by Aadhaar or email
-      const patientsQuery = query(
-        collection(db, 'patient'),
-        where('aadharNumber', '==', formData.aadharNumber)
-      )
-      const patientsSnapshot = await getDocs(patientsQuery)
-      
-      if (patientsSnapshot.empty) {
-        toast.error('Patient not found')
-        return
+      toast.loading('Please place your finger on the scanner...', { id: 'enroll' })
+      const response = await enrollFingerprint()
+
+      if (response.success) {
+        setFingerprintSlotNumber(response.slot_number)
+        toast.success(`Fingerprint enrolled successfully in slot ${response.slot_number}!`, { id: 'enroll' })
+      } else {
+        toast.error('Failed to enroll fingerprint', { id: 'enroll' })
       }
-
-      const patient = patientsSnapshot.docs[0].data()
-      
-      // Create log entry for emergency override
-      await createLog({
-        hospitalId: userData.hospitalId,
-        patientId: patient.patientId,
-        action: 'EMERGENCY_OVERRIDE',
-        remarks: `Emergency access to patient: ${formData.aadharNumber}`
-      })
-
-      // Show patient data (in a real app, you'd show this in a modal or new page)
-      toast.success('Emergency access granted!')
-      setShowModal(false)
     } catch (error) {
-      console.error('Error in emergency override:', error)
-      toast.error('Failed to access patient data')
+      console.error('Enroll error:', error)
+      toast.error(error.message || 'Failed to enroll fingerprint. Please try again.', { id: 'enroll' })
+    } finally {
+      setIsEnrollingFingerprint(false)
+    }
+  }
+
+  const handleSearchFingerprint = async () => {
+    setIsSearchingFingerprint(true)
+    try {
+      toast.loading('Please place your finger on the scanner...', { id: 'search' })
+      const response = await searchFingerprint()
+
+      if (response.success && response.slot_number !== null) {
+        // Search for patient with this slot number
+        const patientsQuery = query(
+          collection(db, 'patient'),
+          where('fingerprintSlotNumber', '==', response.slot_number),
+          where('addedBy', '==', userData?.hospitalId || '')
+        )
+        const patientsSnapshot = await getDocs(patientsQuery)
+        
+        if (patientsSnapshot.empty) {
+          toast.error('Patient not found with this fingerprint', { id: 'search' })
+          return
+        }
+
+        const patientData = {
+          id: patientsSnapshot.docs[0].id,
+          ...patientsSnapshot.docs[0].data()
+        }
+
+        // Create log entry
+        await createLog({
+          hospitalId: userData.hospitalId,
+          patientId: patientData.patientId,
+          action: 'SEARCH_BY_FINGERPRINT',
+          remarks: `Searched patient by fingerprint (slot ${response.slot_number})`
+        })
+
+        // Show patient details
+        setSelectedPatient(patientData)
+        setModalType('view')
+        setShowModal(true)
+        toast.success('Patient found!', { id: 'search' })
+      } else {
+        toast.error('Fingerprint not found in database', { id: 'search' })
+      }
+    } catch (error) {
+      console.error('Search error:', error)
+      toast.error(error.message || 'Failed to search fingerprint. Please try again.', { id: 'search' })
+    } finally {
+      setIsSearchingFingerprint(false)
     }
   }
 
@@ -207,12 +313,17 @@ const HospitalDashboard = () => {
   }
 
   const filteredPatients = patients.filter(patient =>
+    patient.patientName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     patient.aadharNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     patient.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     patient.bloodGroup?.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const patientColumns = [
+    {
+      header: 'Patient Name',
+      key: 'patientName'
+    },
     {
       header: 'Aadhaar Number',
       key: 'aadharNumber'
@@ -250,7 +361,7 @@ const HospitalDashboard = () => {
               setModalType('view')
               setShowModal(true)
             }}
-            className="p-1 text-blue-600 hover:bg-blue-100 rounded"
+            className="p-1 text-blue-600 hover:bg-blue-100 rounded transition-colors"
             title="View Details"
           >
             <Eye className="w-4 h-4" />
@@ -259,9 +370,21 @@ const HospitalDashboard = () => {
             onClick={() => {
               setSelectedPatient(row)
               setModalType('edit')
+              // Initialize edit form with current patient data
+              setEditForm({
+                patientName: row.patientName || '',
+                aadharNumber: row.aadharNumber || '',
+                email: row.email || '',
+                mobileNumber: row.mobileNumber || '',
+                bloodGroup: row.bloodGroup || '',
+                anyAllergy: row.anyAllergy || '',
+                anyDisease: row.anyDisease || '',
+                pastOperation: row.pastOperation || '',
+                patientPrivacyPermission: row.patientPrivacyPermission || 'no'
+              })
               setShowModal(true)
             }}
-            className="p-1 text-green-600 hover:bg-green-100 rounded"
+            className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors"
             title="Edit"
           >
             <Edit className="w-4 h-4" />
@@ -279,10 +402,10 @@ const HospitalDashboard = () => {
       color: 'from-blue-500 to-blue-600'
     },
     {
-      title: 'Emergency Overrides',
-      value: 0, // This would be calculated from logs
-      icon: AlertTriangle,
-      color: 'from-red-500 to-red-600'
+      title: 'Fingerprint Enrolled',
+      value: patients.filter(p => p.fingerprintSlotNumber !== null && p.fingerprintSlotNumber !== undefined).length,
+      icon: Fingerprint,
+      color: 'from-purple-500 to-purple-600'
     },
     {
       title: 'Recent Additions',
@@ -331,8 +454,8 @@ const HospitalDashboard = () => {
           {patients.slice(0, 5).map((patient, index) => (
             <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
               <div>
-                <p className="font-medium text-gray-800">{patient.aadharNumber}</p>
-                <p className="text-sm text-gray-500">{patient.email}</p>
+                <p className="font-medium text-gray-800">{patient.patientName || 'N/A'}</p>
+                <p className="text-sm text-gray-500">{patient.aadharNumber} • {patient.email}</p>
               </div>
               <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
                 {patient.bloodGroup}
@@ -347,27 +470,41 @@ const HospitalDashboard = () => {
   const renderAddPatient = () => (
     <div className="bg-white rounded-xl p-6 shadow-lg">
       <h3 className="text-lg font-semibold text-gray-800 mb-6">Add New Patient</h3>
-      <form onSubmit={(e) => {
-        e.preventDefault()
-        const formData = new FormData(e.target)
-        const patientData = {
-          aadharNumber: formData.get('aadharNumber'),
-          email: formData.get('email'),
-          mobileNumber: formData.get('mobileNumber'),
-          bloodGroup: formData.get('bloodGroup'),
-          anyAllergy: formData.get('anyAllergy'),
-          anyDisease: formData.get('anyDisease'),
-          pastOperation: formData.get('pastOperation')
-        }
-        handleAddPatient(patientData)
-      }} className="space-y-4">
+      <form 
+        ref={addPatientFormRef}
+        onSubmit={(e) => {
+          e.preventDefault()
+          const formData = new FormData(e.target)
+          const patientData = {
+            patientName: formData.get('patientName'),
+            aadharNumber: formData.get('aadharNumber'),
+            email: formData.get('email'),
+            mobileNumber: formData.get('mobileNumber'),
+            bloodGroup: formData.get('bloodGroup'),
+            anyAllergy: formData.get('anyAllergy'),
+            anyDisease: formData.get('anyDisease'),
+            pastOperation: formData.get('pastOperation'),
+            patientPrivacyPermission: formData.get('patientPrivacyPermission')
+          }
+          handleAddPatient(patientData, e.target)
+        }} 
+        className="space-y-4"
+      >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormInput
+            label="Patient Name"
+            name="patientName"
+            placeholder="Enter patient full name"
+            required
+          />
           <FormInput
             label="Aadhaar Number"
             name="aadharNumber"
             placeholder="Enter 12-digit Aadhaar number"
             required
           />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormInput
             label="Email"
             type="email"
@@ -375,14 +512,14 @@ const HospitalDashboard = () => {
             placeholder="patient@example.com"
             required
           />
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormInput
             label="Mobile Number"
             name="mobileNumber"
             placeholder="Enter 10-digit mobile number"
             required
           />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormInput
             label="Blood Group"
             name="bloodGroup"
@@ -407,11 +544,94 @@ const HospitalDashboard = () => {
             placeholder="List past operations"
           />
         </div>
+        
+        {/* Privacy Permission Radio Buttons */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <label className="block text-sm font-medium text-gray-700 mb-3">
+            Patient is willing to share this data to other hospitals in emergency
+            <span className="text-red-500 ml-1">*</span>
+          </label>
+          <div className="flex items-center space-x-6">
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="radio"
+                name="patientPrivacyPermission"
+                value="yes"
+                required
+                className="w-4 h-4 text-blue-600 focus:ring-blue-500 focus:ring-2"
+              />
+              <span className="text-gray-700 font-medium">Yes</span>
+            </label>
+            <label className="flex items-center space-x-2 cursor-pointer">
+              <input
+                type="radio"
+                name="patientPrivacyPermission"
+                value="no"
+                required
+                className="w-4 h-4 text-blue-600 focus:ring-blue-500 focus:ring-2"
+              />
+              <span className="text-gray-700 font-medium">No</span>
+            </label>
+          </div>
+        </div>
+        
+        {/* Fingerprint Enrollment */}
+        <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+          <label className="block text-sm font-medium text-gray-700 mb-3">
+            Fingerprint Enrollment (Optional)
+          </label>
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              {fingerprintSlotNumber !== null ? (
+                <p className="text-sm text-gray-700">
+                  ✅ Fingerprint enrolled in slot <span className="font-semibold text-purple-600">{fingerprintSlotNumber}</span>
+                </p>
+              ) : (
+                <p className="text-sm text-gray-600">
+                  Register patient's fingerprint to enable quick search later
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={handleEnrollFingerprint}
+              disabled={isEnrollingFingerprint || isAddingPatient}
+              className="ml-4 bg-gradient-to-r from-purple-500 to-purple-600 text-white px-6 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+            >
+              {isEnrollingFingerprint ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Enrolling...</span>
+                </>
+              ) : (
+                <>
+                  <Fingerprint className="w-4 h-4" />
+                  <span>{fingerprintSlotNumber !== null ? 'Re-enroll' : 'Enroll Fingerprint'}</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+        
         <button
           type="submit"
-          className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+          disabled={isAddingPatient}
+          className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
         >
-          Add Patient
+          {isAddingPatient ? (
+            <>
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Adding Patient...</span>
+            </>
+          ) : (
+            <span>Add Patient</span>
+          )}
         </button>
       </form>
     </div>
@@ -449,43 +669,39 @@ const HospitalDashboard = () => {
     </div>
   )
 
-  const renderEmergencyOverride = () => (
+  const renderSearchFingerprint = () => (
     <div className="bg-white rounded-xl p-6 shadow-lg">
       <div className="flex items-center space-x-2 mb-6">
-        <AlertTriangle className="w-6 h-6 text-red-600" />
-        <h3 className="text-lg font-semibold text-gray-800">Emergency Override</h3>
+        <Fingerprint className="w-6 h-6 text-purple-600" />
+        <h3 className="text-lg font-semibold text-gray-800">Search Patient by Fingerprint</h3>
       </div>
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-        <p className="text-sm text-red-800">
-          <strong>Warning:</strong> This action will be logged and monitored. Use only in genuine emergency situations.
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <p className="text-sm text-blue-800">
+          <strong>Instructions:</strong> Place the patient's finger on the scanner to search for their records in the database.
         </p>
       </div>
-      <form onSubmit={(e) => {
-        e.preventDefault()
-        handleEmergencyOverride(emergencyForm)
-      }} className="space-y-4">
-        <FormInput
-          label="Aadhaar Number"
-          value={emergencyForm.aadharNumber}
-          onChange={(e) => setEmergencyForm({...emergencyForm, aadharNumber: e.target.value})}
-          placeholder="Enter 12-digit Aadhaar number"
-          required
-        />
-        <FormInput
-          label="Email"
-          type="email"
-          value={emergencyForm.email}
-          onChange={(e) => setEmergencyForm({...emergencyForm, email: e.target.value})}
-          placeholder="patient@example.com"
-          required
-        />
+      <div className="space-y-4">
         <button
-          type="submit"
-          className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+          onClick={handleSearchFingerprint}
+          disabled={isSearchingFingerprint}
+          className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
         >
-          Emergency Access
+          {isSearchingFingerprint ? (
+            <>
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Searching...</span>
+            </>
+          ) : (
+            <>
+              <Fingerprint className="w-5 h-5" />
+              <span>Scan Fingerprint</span>
+            </>
+          )}
         </button>
-      </form>
+      </div>
     </div>
   )
 
@@ -500,7 +716,7 @@ const HospitalDashboard = () => {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search patients by Aadhaar, email, or blood group..."
+              placeholder="Search patients by name, Aadhaar, email, or blood group..."
               className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
           </div>
@@ -527,8 +743,8 @@ const HospitalDashboard = () => {
         return renderManagePatients()
       case 'access-patient':
         return renderAccessPatient()
-      case 'emergency':
-        return renderEmergencyOverride()
+      case 'search-fingerprint':
+        return renderSearchFingerprint()
       case 'profile':
         return (
           <div className="space-y-6">
@@ -639,6 +855,230 @@ const HospitalDashboard = () => {
           {renderContent()}
         </div>
       </div>
+
+      {/* Patient View/Edit Modal */}
+      <Modal
+        isOpen={showModal && selectedPatient !== null}
+        onClose={() => {
+          setShowModal(false)
+          setSelectedPatient(null)
+          setModalType('')
+        }}
+        title={modalType === 'view' ? 'Patient Details' : 'Edit Patient'}
+        size="lg"
+      >
+        {modalType === 'view' ? (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
+                <p className="text-gray-900 font-medium text-lg">{selectedPatient?.patientName || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Aadhaar Number</label>
+                <p className="text-gray-900 font-medium">{selectedPatient?.aadharNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <p className="text-gray-900 font-medium">{selectedPatient?.email || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
+                <p className="text-gray-900 font-medium">{selectedPatient?.mobileNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Blood Group</label>
+                <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                  {selectedPatient?.bloodGroup || 'N/A'}
+                </span>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Any Allergy</label>
+                <p className="text-gray-900">{selectedPatient?.anyAllergy || 'None'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Any Disease</label>
+                <p className="text-gray-900">{selectedPatient?.anyDisease || 'None'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Past Operation</label>
+                <p className="text-gray-900">{selectedPatient?.pastOperation || 'None'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Privacy Permission</label>
+                <span className={`inline-block px-3 py-1 rounded-full text-sm font-medium ${
+                  selectedPatient?.patientPrivacyPermission === 'yes' 
+                    ? 'bg-green-100 text-green-800' 
+                    : 'bg-gray-100 text-gray-800'
+                }`}>
+                  {selectedPatient?.patientPrivacyPermission === 'yes' ? 'Yes - Share in Emergency' : 'No - Private'}
+                </span>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Fingerprint Slot</label>
+                {selectedPatient?.fingerprintSlotNumber !== null && selectedPatient?.fingerprintSlotNumber !== undefined ? (
+                  <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm font-medium">
+                    Slot {selectedPatient.fingerprintSlotNumber}
+                  </span>
+                ) : (
+                  <span className="text-gray-500 text-sm">Not enrolled</span>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Added Date</label>
+                <p className="text-gray-900">
+                  {selectedPatient?.createdAt 
+                    ? new Date(selectedPatient.createdAt).toLocaleString() 
+                    : 'N/A'}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Last Updated</label>
+                <p className="text-gray-900">
+                  {selectedPatient?.updatedAt 
+                    ? new Date(selectedPatient.updatedAt).toLocaleString() 
+                    : 'N/A'}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <form onSubmit={(e) => {
+              e.preventDefault()
+              handleUpdatePatient()
+            }}>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormInput
+                  label="Patient Name"
+                  value={editForm.patientName}
+                  onChange={(e) => setEditForm({...editForm, patientName: e.target.value})}
+                  placeholder="Enter patient full name"
+                  required
+                />
+                <FormInput
+                  label="Aadhaar Number"
+                  value={editForm.aadharNumber}
+                  onChange={(e) => setEditForm({...editForm, aadharNumber: e.target.value})}
+                  placeholder="Enter 12-digit Aadhaar number"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormInput
+                  label="Email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm({...editForm, email: e.target.value})}
+                  placeholder="patient@example.com"
+                  required
+                />
+                <FormInput
+                  label="Mobile Number"
+                  value={editForm.mobileNumber}
+                  onChange={(e) => setEditForm({...editForm, mobileNumber: e.target.value})}
+                  placeholder="Enter 10-digit mobile number"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormInput
+                  label="Blood Group"
+                  value={editForm.bloodGroup}
+                  onChange={(e) => setEditForm({...editForm, bloodGroup: e.target.value})}
+                  placeholder="e.g., A+, B-, O+, AB-"
+                  required
+                />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <FormInput
+                  label="Any Allergy"
+                  value={editForm.anyAllergy}
+                  onChange={(e) => setEditForm({...editForm, anyAllergy: e.target.value})}
+                  placeholder="List any allergies"
+                />
+                <FormInput
+                  label="Any Disease"
+                  value={editForm.anyDisease}
+                  onChange={(e) => setEditForm({...editForm, anyDisease: e.target.value})}
+                  placeholder="List any diseases"
+                />
+                <FormInput
+                  label="Past Operation"
+                  value={editForm.pastOperation}
+                  onChange={(e) => setEditForm({...editForm, pastOperation: e.target.value})}
+                  placeholder="List past operations"
+                />
+              </div>
+              
+              {/* Privacy Permission Radio Buttons */}
+              <div className="bg-gray-50 rounded-lg p-4">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Patient is willing to share this data to other hospitals in emergency
+                  <span className="text-red-500 ml-1">*</span>
+                </label>
+                <div className="flex items-center space-x-6">
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="patientPrivacyPermission"
+                      value="yes"
+                      checked={editForm.patientPrivacyPermission === 'yes'}
+                      onChange={(e) => setEditForm({...editForm, patientPrivacyPermission: e.target.value})}
+                      required
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                    />
+                    <span className="text-gray-700 font-medium">Yes</span>
+                  </label>
+                  <label className="flex items-center space-x-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="patientPrivacyPermission"
+                      value="no"
+                      checked={editForm.patientPrivacyPermission === 'no'}
+                      onChange={(e) => setEditForm({...editForm, patientPrivacyPermission: e.target.value})}
+                      required
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500 focus:ring-2"
+                    />
+                    <span className="text-gray-700 font-medium">No</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModal(false)
+                    setSelectedPatient(null)
+                    setModalType('')
+                  }}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdatingPatient}
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {isUpdatingPatient ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <span>Save Changes</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        )}
+      </Modal>
 
       {/* Password Change Modal */}
       <Modal
