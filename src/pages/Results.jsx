@@ -12,7 +12,8 @@ import {
   BarChart3,
   RefreshCw,
   Heart,
-  Zap
+  Zap,
+  AlertCircle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -164,6 +165,26 @@ const Results = () => {
             <p className="text-xl text-gray-600">
               AI-powered analysis using dual deep learning models
             </p>
+          </div>
+        </motion.div>
+
+        {/* Disclaimer */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.2 }}
+          className="mb-8"
+        >
+          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-xl p-4">
+            <div className="flex items-start space-x-3">
+              <AlertCircle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-semibold text-yellow-800 mb-1">Important Disclaimer</h4>
+                <p className="text-sm text-yellow-700 leading-relaxed">
+                  This AI system is currently in <strong>training and development phase</strong>. The blood group predictions shown are <strong>experimental and should not be used as the sole basis for medical decisions</strong>. Always verify results with standard laboratory testing methods. This system is intended for research and educational purposes only.
+                </p>
+              </div>
+            </div>
           </div>
         </motion.div>
 

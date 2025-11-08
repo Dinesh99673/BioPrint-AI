@@ -2294,10 +2294,23 @@ const HospitalDashboard = () => {
             <Activity className="w-6 h-6 text-red-600" />
             <h3 className="text-lg font-semibold text-gray-800">Blood Group Detection</h3>
           </div>
-          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
             <p className="text-sm text-yellow-800">
               <strong>Instructions:</strong> Upload a fingerprint image or scan directly from the R307s sensor to detect blood group using AI.
             </p>
+          </div>
+
+          {/* Disclaimer */}
+          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-semibold text-red-800 mb-1">Important Medical Disclaimer</h4>
+                <p className="text-sm text-red-700 leading-relaxed">
+                  This AI system is currently in <strong>training and development phase</strong>. Blood group predictions are <strong>experimental and should not be used as the sole basis for medical decisions or patient care</strong>. Always verify results with standard laboratory testing methods before making any clinical decisions. The accuracy rates may vary in real-world scenarios. This system is intended for research and educational purposes only.
+                </p>
+              </div>
+            </div>
           </div>
 
           {/* Image Upload Section */}
