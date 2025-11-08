@@ -12,7 +12,12 @@ import {
   Phone,
   Mail,
   Fingerprint,
-  Activity
+  Activity,
+  Upload,
+  Image as ImageIcon,
+  X,
+  User,
+  AlertTriangle
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import Sidebar from '../../components/Sidebar'
@@ -20,13 +25,13 @@ import Table from '../../components/Table'
 import Modal from '../../components/Modal'
 import FormInput from '../../components/FormInput'
 import toast from 'react-hot-toast'
-import { collection, getDocs, doc, setDoc, updateDoc, query, where, orderBy } from 'firebase/firestore'
+import { collection, getDocs, doc, setDoc, updateDoc, query, where, orderBy, arrayUnion } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import axios from 'axios'
 import { updatePassword } from 'firebase/auth'
 import { auth } from '../../firebase/config'
 import { cleanupGeneratedPassword, isUsingGeneratedPassword, validatePassword } from '../../utils/hospitalAuth'
-import { enrollFingerprint, searchFingerprint } from '../../utils/api'
+import { enrollFingerprint, searchFingerprint, sendOtp, verifyOtp, sendEmail } from '../../utils/api'
 
 const HospitalDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview')
@@ -37,6 +42,12 @@ const HospitalDashboard = () => {
   const [modalType, setModalType] = useState('')
   const [searchQuery, setSearchQuery] = useState('')
   const [accessForm, setAccessForm] = useState({ aadharNumber: '', email: '' })
+  const [accessPatientOtp, setAccessPatientOtp] = useState('')
+  const [isSendingAccessOtp, setIsSendingAccessOtp] = useState(false)
+  const [isVerifyingAccessOtp, setIsVerifyingAccessOtp] = useState(false)
+  const [accessPatientData, setAccessPatientData] = useState(null)
+  const [accessPatientNote, setAccessPatientNote] = useState('')
+  const [isAddingAccessNote, setIsAddingAccessNote] = useState(false)
   const [passwordForm, setPasswordForm] = useState({ 
     currentPassword: '', 
     newPassword: '', 
@@ -48,17 +59,40 @@ const HospitalDashboard = () => {
   const [isEnrollingFingerprint, setIsEnrollingFingerprint] = useState(false)
   const [isSearchingFingerprint, setIsSearchingFingerprint] = useState(false)
   const [fingerprintSlotNumber, setFingerprintSlotNumber] = useState(null)
+  const [patientImage, setPatientImage] = useState(null)
+  const [patientImagePreview, setPatientImagePreview] = useState(null)
+  const [addPatientAadhar, setAddPatientAadhar] = useState('')
+  const [isSearchingAadhar, setIsSearchingAadhar] = useState(false)
+  const [foundPatientForAdd, setFoundPatientForAdd] = useState(null)
+  const [showRegistrationForm, setShowRegistrationForm] = useState(false)
+  const [showOtpModal, setShowOtpModal] = useState(false)
+  const [otpData, setOtpData] = useState({ email: '', otp: '', patientId: null, patientData: null })
+  const [isSendingOtp, setIsSendingOtp] = useState(false)
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false)
+  const [patientNote, setPatientNote] = useState('')
+  const [isAddingNote, setIsAddingNote] = useState(false)
+  const [editPatientNote, setEditPatientNote] = useState('')
+  const [isAddingEditNote, setIsAddingEditNote] = useState(false)
+  const [foundPatientByFingerprint, setFoundPatientByFingerprint] = useState(null)
+  const [fingerprintOtpData, setFingerprintOtpData] = useState({ email: '', otp: '', patientId: null, patientData: null })
+  const [isSendingFingerprintOtp, setIsSendingFingerprintOtp] = useState(false)
+  const [isVerifyingFingerprintOtp, setIsVerifyingFingerprintOtp] = useState(false)
+  const [fingerprintNote, setFingerprintNote] = useState('')
+  const [isAddingFingerprintNote, setIsAddingFingerprintNote] = useState(false)
   const addPatientFormRef = useRef(null)
+  const imageInputRef = useRef(null)
   const [editForm, setEditForm] = useState({
     patientName: '',
     aadharNumber: '',
     email: '',
     mobileNumber: '',
+    relativesNumber: '',
     bloodGroup: '',
     anyAllergy: '',
     anyDisease: '',
     pastOperation: '',
-    patientPrivacyPermission: ''
+    patientPrivacyPermission: '',
+    patientImage: null
   })
   
   const { userData, createLog } = useAuth()
@@ -93,13 +127,26 @@ const HospitalDashboard = () => {
     setIsAddingPatient(true)
     try {
       const patientId = Date.now().toString()
+      const currentTime = new Date().toISOString()
+      const hospitalId = userData.hospitalId
+      
       const newPatient = {
         patientId,
-        addedBy: userData.hospitalId,
+        addedBy: hospitalId,
+        primaryHospital: hospitalId,
+        associatedHospitals: [hospitalId],
+        hospitalRecords: {
+          [hospitalId]: {
+            linkedAt: currentTime,
+            lastAccessed: currentTime,
+            notes: []
+          }
+        },
         ...patientData,
-        fingerprintSlotNumber: fingerprintSlotNumber,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        fingerprintSlotNumber: fingerprintSlotNumber || null,
+        patientImage: patientImage || null,
+        createdAt: currentTime,
+        updatedAt: currentTime
       }
 
       await setDoc(doc(db, 'patient', patientId), newPatient)
@@ -114,11 +161,21 @@ const HospitalDashboard = () => {
 
       toast.success('Patient added successfully!')
       
-      // Reset form and fingerprint slot
+      // Reset form, fingerprint slot, and image
       if (formElement) {
         formElement.reset()
       }
       setFingerprintSlotNumber(null)
+      setPatientImage(null)
+      setPatientImagePreview(null)
+      if (imageInputRef.current) {
+        imageInputRef.current.value = ''
+      }
+      
+      // Reset states
+      setAddPatientAadhar('')
+      setShowRegistrationForm(false)
+      setFoundPatientForAdd(null)
       
       // Refresh patient list
       await fetchPatients()
@@ -127,6 +184,278 @@ const HospitalDashboard = () => {
       toast.error('Failed to add patient')
     } finally {
       setIsAddingPatient(false)
+    }
+  }
+
+  const handleSearchAadharForAdd = async () => {
+    if (!addPatientAadhar || addPatientAadhar.trim().length !== 12) {
+      toast.error('Please enter a valid 12-digit Aadhaar number')
+      return
+    }
+
+    setIsSearchingAadhar(true)
+    try {
+      const patientsQuery = query(
+        collection(db, 'patient'),
+        where('aadharNumber', '==', addPatientAadhar.trim())
+      )
+      const patientsSnapshot = await getDocs(patientsQuery)
+      
+      if (patientsSnapshot.empty) {
+        // Patient doesn't exist - show registration form
+        setShowRegistrationForm(true)
+        setIsSearchingAadhar(false)
+        return
+      }
+
+      // Patient exists
+      const existingPatientDoc = patientsSnapshot.docs[0]
+      const existingPatient = {
+        id: existingPatientDoc.id,
+        ...existingPatientDoc.data()
+      }
+      
+      // Check if hospital already has access
+      const hasAccess = existingPatient.associatedHospitals?.includes(userData.hospitalId) || 
+                       existingPatient.addedBy === userData.hospitalId
+      
+      if (hasAccess) {
+        toast.error('You already have access to this patient')
+        setIsSearchingAadhar(false)
+        return
+      }
+      
+      // Check privacy permission
+      if (existingPatient.patientPrivacyPermission === 'no') {
+        // Privacy restricted - ask if they want to link
+        const wantToLink = window.confirm('This patient has privacy restrictions. Do you want to request access? An OTP will be sent to the patient\'s email.')
+        if (wantToLink) {
+          setOtpData({
+            email: existingPatient.email,
+            otp: '',
+            patientId: existingPatientDoc.id,
+            patientData: existingPatient
+          })
+          setShowOtpModal(true)
+          setIsSearchingAadhar(false)
+          // Auto-send OTP
+          handleSendOtp(existingPatient.email)
+        } else {
+          setIsSearchingAadhar(false)
+        }
+        return
+      }
+      
+      // Privacy permission is "yes" - automatically link hospital and show patient data
+      await linkHospitalToPatient(existingPatientDoc.id, existingPatient)
+      
+      // Refresh patient data after linking
+      const updatedPatientDoc = await getDocs(query(
+        collection(db, 'patient'),
+        where('aadharNumber', '==', existingPatient.aadharNumber)
+      ))
+      if (!updatedPatientDoc.empty) {
+        const updatedPatient = {
+          id: updatedPatientDoc.docs[0].id,
+          ...updatedPatientDoc.docs[0].data()
+        }
+        setFoundPatientForAdd(updatedPatient)
+      } else {
+        setFoundPatientForAdd(existingPatient)
+      }
+      setIsSearchingAadhar(false)
+    } catch (error) {
+      console.error('Error searching Aadhaar:', error)
+      toast.error('Failed to search patient')
+      setIsSearchingAadhar(false)
+    }
+  }
+
+  const linkHospitalToPatient = async (patientId, patientData, initialNote = null) => {
+    try {
+      const hospitalId = userData.hospitalId
+      const currentTime = new Date().toISOString()
+      
+      // Update hospitalRecords
+      const hospitalRecord = {
+        linkedAt: currentTime,
+        lastAccessed: currentTime,
+        notes: initialNote ? [{
+          addedAt: currentTime,
+          note: initialNote,
+          addedBy: hospitalId,
+          hospitalName: userData.name
+        }] : []
+      }
+      
+      // Update Firestore
+      await updateDoc(doc(db, 'patient', patientId), {
+        [`hospitalRecords.${hospitalId}`]: hospitalRecord,
+        associatedHospitals: arrayUnion(hospitalId),
+        updatedAt: currentTime
+      })
+      
+      // Send email notification to patient
+      try {
+        await sendEmail({
+          to: patientData.email,
+          subject: 'New Hospital Linked to Your Medical Records',
+          body: `A new hospital (${userData.name}) has been linked to your medical records. They now have access to your information.`
+        })
+      } catch (emailError) {
+        console.error('Error sending email:', emailError)
+        // Don't fail the whole operation if email fails
+      }
+      
+      // Create log entry
+      await createLog({
+        hospitalId: userData.hospitalId,
+        patientId: patientData.patientId,
+        action: 'LINK_PATIENT',
+        remarks: `Linked to existing patient: ${patientData.aadharNumber}`
+      })
+      
+      toast.success('Hospital linked to patient successfully!')
+      
+      // Refresh patient data
+      const updatedPatientDoc = await getDocs(query(
+        collection(db, 'patient'),
+        where('aadharNumber', '==', patientData.aadharNumber)
+      ))
+      if (!updatedPatientDoc.empty) {
+        const updatedPatient = {
+          id: updatedPatientDoc.docs[0].id,
+          ...updatedPatientDoc.docs[0].data()
+        }
+        setFoundPatientForAdd(updatedPatient)
+      }
+    } catch (error) {
+      console.error('Error linking hospital to patient:', error)
+      toast.error('Failed to link hospital to patient')
+      throw error
+    }
+  }
+
+  const handleSendOtp = async (email) => {
+    setIsSendingOtp(true)
+    try {
+      await sendOtp(email)
+      toast.success('OTP sent to patient email!')
+    } catch (error) {
+      toast.error(error.message || 'Failed to send OTP')
+    } finally {
+      setIsSendingOtp(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    if (!otpData.otp || otpData.otp.length !== 6) {
+      toast.error('Please enter a valid 6-digit OTP')
+      return
+    }
+
+    setIsVerifyingOtp(true)
+    try {
+      await verifyOtp(otpData.email, otpData.otp)
+      
+      // OTP verified - link hospital to patient
+      if (otpData.patientId && otpData.patientData) {
+        await linkHospitalToPatient(otpData.patientId, otpData.patientData)
+        
+        // Create log entry
+        await createLog({
+          hospitalId: userData.hospitalId,
+          patientId: otpData.patientData.patientId,
+          action: 'OTP_VERIFIED_ACCESS_GRANTED',
+          remarks: `OTP verified and access granted for patient: ${otpData.patientData.aadharNumber}`
+        })
+        
+        // Close OTP modal and show patient data
+        setShowOtpModal(false)
+        const patientDataCopy = otpData.patientData
+        setOtpData({ email: '', otp: '', patientId: null, patientData: null })
+        
+        // Refresh and show patient
+        const updatedPatientDoc = await getDocs(query(
+          collection(db, 'patient'),
+          where('aadharNumber', '==', patientDataCopy.aadharNumber)
+        ))
+        if (!updatedPatientDoc.empty) {
+          const updatedPatient = {
+            id: updatedPatientDoc.docs[0].id,
+            ...updatedPatientDoc.docs[0].data()
+          }
+          setFoundPatientForAdd(updatedPatient)
+        }
+        
+        toast.success('OTP verified! Access granted.')
+      }
+    } catch (error) {
+      toast.error(error.message || 'Failed to verify OTP')
+    } finally {
+      setIsVerifyingOtp(false)
+    }
+  }
+
+  const handleAddNote = async () => {
+    if (!patientNote.trim() || !foundPatientForAdd) {
+      toast.error('Please enter a note')
+      return
+    }
+
+    setIsAddingNote(true)
+    try {
+      const hospitalId = userData.hospitalId
+      const currentTime = new Date().toISOString()
+      
+      // Get current notes
+      const currentNotes = foundPatientForAdd.hospitalRecords?.[hospitalId]?.notes || []
+      
+      // Add new note
+      const newNote = {
+        addedAt: currentTime,
+        note: patientNote.trim(),
+        addedBy: hospitalId,
+        hospitalName: userData.name
+      }
+      
+      const updatedNotes = [...currentNotes, newNote]
+      
+      // Update Firestore
+      await updateDoc(doc(db, 'patient', foundPatientForAdd.id), {
+        [`hospitalRecords.${hospitalId}.notes`]: updatedNotes,
+        [`hospitalRecords.${hospitalId}.lastAccessed`]: currentTime,
+        updatedAt: currentTime
+      })
+      
+      // Create log entry
+      await createLog({
+        hospitalId: userData.hospitalId,
+        patientId: foundPatientForAdd.patientId,
+        action: 'ADD_NOTE',
+        remarks: `Added note for patient: ${foundPatientForAdd.aadharNumber}`
+      })
+      
+      // Refresh patient data
+      const updatedPatientDoc = await getDocs(query(
+        collection(db, 'patient'),
+        where('aadharNumber', '==', foundPatientForAdd.aadharNumber)
+      ))
+      if (!updatedPatientDoc.empty) {
+        const updatedPatient = {
+          id: updatedPatientDoc.docs[0].id,
+          ...updatedPatientDoc.docs[0].data()
+        }
+        setFoundPatientForAdd(updatedPatient)
+      }
+      
+      setPatientNote('')
+      toast.success('Note added successfully!')
+    } catch (error) {
+      console.error('Error adding note:', error)
+      toast.error('Failed to add note')
+    } finally {
+      setIsAddingNote(false)
     }
   }
 
@@ -141,11 +470,13 @@ const HospitalDashboard = () => {
         aadharNumber: editForm.aadharNumber,
         email: editForm.email,
         mobileNumber: editForm.mobileNumber,
+        relativesNumber: editForm.relativesNumber,
         bloodGroup: editForm.bloodGroup,
         anyAllergy: editForm.anyAllergy,
         anyDisease: editForm.anyDisease,
         pastOperation: editForm.pastOperation,
         patientPrivacyPermission: editForm.patientPrivacyPermission,
+        patientImage: editForm.patientImage || selectedPatient?.patientImage || null,
         updatedAt: new Date().toISOString()
       }
 
@@ -162,6 +493,7 @@ const HospitalDashboard = () => {
       toast.success('Patient updated successfully!')
       setShowModal(false)
       setSelectedPatient(null)
+      setPatientImagePreview(null)
       await fetchPatients()
     } catch (error) {
       console.error('Error updating patient:', error)
@@ -172,27 +504,218 @@ const HospitalDashboard = () => {
   }
 
   const handleAccessPatient = async (formData) => {
+    setIsSendingAccessOtp(true)
     try {
-      // Send OTP via FastAPI
-      const response = await axios.post(`${import.meta.env.VITE_API_BASE_URL}/send-otp`, {
-        email: formData.email
-      })
+      // First, search for patient by Aadhaar number
+      const patientsQuery = query(
+        collection(db, 'patient'),
+        where('aadharNumber', '==', formData.aadharNumber.trim())
+      )
+      const patientsSnapshot = await getDocs(patientsQuery)
+      
+      if (patientsSnapshot.empty) {
+        toast.error('Patient not found with this Aadhaar number')
+        setIsSendingAccessOtp(false)
+        return
+      }
 
-      if (response.data.success) {
+      const patientData = {
+        id: patientsSnapshot.docs[0].id,
+        ...patientsSnapshot.docs[0].data()
+      }
+
+      // Verify email matches
+      if (patientData.email !== formData.email.trim()) {
+        toast.error('Email does not match the patient record')
+        setIsSendingAccessOtp(false)
+        return
+      }
+
+      // Check if hospital already has access
+      const hasAccess = patientData.associatedHospitals?.includes(userData.hospitalId) || 
+                       patientData.addedBy === userData.hospitalId
+
+      if (hasAccess) {
+        // Hospital has access - show patient data directly
+        // Update last accessed time
+        if (patientData.hospitalRecords && patientData.hospitalRecords[userData.hospitalId]) {
+          await updateDoc(doc(db, 'patient', patientData.id), {
+            [`hospitalRecords.${userData.hospitalId}.lastAccessed`]: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+          })
+          // Refresh patient data
+          const updatedPatientDoc = await getDocs(query(
+            collection(db, 'patient'),
+            where('aadharNumber', '==', formData.aadharNumber.trim())
+          ))
+          if (!updatedPatientDoc.empty) {
+            const updatedPatient = {
+              id: updatedPatientDoc.docs[0].id,
+              ...updatedPatientDoc.docs[0].data()
+            }
+            setAccessPatientData(updatedPatient)
+          } else {
+            setAccessPatientData(patientData)
+          }
+        } else {
+          setAccessPatientData(patientData)
+        }
+
+        // Create log entry
+        await createLog({
+          hospitalId: userData.hospitalId,
+          patientId: patientData.patientId,
+          action: 'ACCESS_PATIENT',
+          remarks: `Accessed patient data: ${formData.aadharNumber}`
+        })
+
+        toast.success('Patient data accessed!')
+        setIsSendingAccessOtp(false)
+        return
+      }
+
+      // Hospital doesn't have access - send OTP
+      const response = await sendOtp(formData.email)
+
+      if (response.success) {
+        // Don't set accessPatientData yet - wait for OTP verification
+        // Store patient data temporarily in a different way to show OTP input
+        // We'll use accessForm to track that OTP was sent
         toast.success('OTP sent to patient email!')
         
         // Create log entry
         await createLog({
           hospitalId: userData.hospitalId,
-          action: 'SEND_OTP',
-          remarks: `Sent OTP to patient: ${formData.aadharNumber}`
+          patientId: patientData.patientId,
+          action: 'SEND_OTP_ACCESS',
+          remarks: `Sent OTP to patient for access: ${formData.aadharNumber}`
         })
+        
+        // Store patient data in a temporary state for OTP verification
+        // We'll use a ref or store it differently - for now, we'll store it in a way that doesn't trigger patient view
+        // Actually, we need to store it somewhere accessible for handleVerifyAccessOtp
+        // Let's use a separate state for pending patient data
+        setAccessPatientData({ ...patientData, _pendingOtp: true })
       } else {
-        throw new Error(response.data.message || 'Failed to send OTP')
+        throw new Error(response.message || 'Failed to send OTP')
       }
     } catch (error) {
-      console.error('Error sending OTP:', error)
-      toast.error('Failed to send OTP. Please try again.')
+      console.error('Error accessing patient:', error)
+      toast.error(error.message || 'Failed to access patient. Please try again.')
+    } finally {
+      setIsSendingAccessOtp(false)
+    }
+  }
+
+  const handleVerifyAccessOtp = async () => {
+    if (!accessPatientOtp || accessPatientOtp.length !== 6) {
+      toast.error('Please enter a valid 6-digit OTP')
+      return
+    }
+
+    if (!accessPatientData) {
+      toast.error('Patient data not found')
+      return
+    }
+
+    setIsVerifyingAccessOtp(true)
+    try {
+      await verifyOtp(accessPatientData.email, accessPatientOtp)
+      
+      // OTP verified - link hospital to patient
+      await linkHospitalToPatient(accessPatientData.id, accessPatientData)
+      
+      // Create log entry
+      await createLog({
+        hospitalId: userData.hospitalId,
+        patientId: accessPatientData.patientId,
+        action: 'OTP_VERIFIED_ACCESS_GRANTED',
+        remarks: `OTP verified and access granted for patient: ${accessPatientData.aadharNumber}`
+      })
+      
+      // Refresh patient data
+      const updatedPatientDoc = await getDocs(query(
+        collection(db, 'patient'),
+        where('aadharNumber', '==', accessPatientData.aadharNumber)
+      ))
+      if (!updatedPatientDoc.empty) {
+        const updatedPatient = {
+          id: updatedPatientDoc.docs[0].id,
+          ...updatedPatientDoc.docs[0].data()
+        }
+        // Remove _pendingOtp flag
+        delete updatedPatient._pendingOtp
+        setAccessPatientData(updatedPatient)
+      }
+      
+      setAccessPatientOtp('')
+      toast.success('OTP verified! Access granted.')
+    } catch (error) {
+      toast.error(error.message || 'Failed to verify OTP')
+    } finally {
+      setIsVerifyingAccessOtp(false)
+    }
+  }
+
+  const handleAddAccessNote = async () => {
+    if (!accessPatientNote.trim() || !accessPatientData) {
+      toast.error('Please enter a note')
+      return
+    }
+
+    setIsAddingAccessNote(true)
+    try {
+      const hospitalId = userData.hospitalId
+      const currentTime = new Date().toISOString()
+      
+      // Get current notes
+      const currentNotes = accessPatientData.hospitalRecords?.[hospitalId]?.notes || []
+      
+      // Add new note
+      const newNote = {
+        addedAt: currentTime,
+        note: accessPatientNote.trim(),
+        addedBy: hospitalId,
+        hospitalName: userData.name
+      }
+      
+      const updatedNotes = [...currentNotes, newNote]
+      
+      // Update Firestore
+      await updateDoc(doc(db, 'patient', accessPatientData.id), {
+        [`hospitalRecords.${hospitalId}.notes`]: updatedNotes,
+        [`hospitalRecords.${hospitalId}.lastAccessed`]: currentTime,
+        updatedAt: currentTime
+      })
+      
+      // Create log entry
+      await createLog({
+        hospitalId: userData.hospitalId,
+        patientId: accessPatientData.patientId,
+        action: 'ADD_NOTE',
+        remarks: `Added note for patient via access: ${accessPatientData.aadharNumber}`
+      })
+      
+      // Refresh patient data
+      const updatedPatientDoc = await getDocs(query(
+        collection(db, 'patient'),
+        where('aadharNumber', '==', accessPatientData.aadharNumber)
+      ))
+      if (!updatedPatientDoc.empty) {
+        const updatedPatient = {
+          id: updatedPatientDoc.docs[0].id,
+          ...updatedPatientDoc.docs[0].data()
+        }
+        setAccessPatientData(updatedPatient)
+      }
+      
+      setAccessPatientNote('')
+      toast.success('Note added successfully!')
+    } catch (error) {
+      console.error('Error adding note:', error)
+      toast.error('Failed to add note')
+    } finally {
+      setIsAddingAccessNote(false)
     }
   }
 
@@ -223,16 +746,16 @@ const HospitalDashboard = () => {
       const response = await searchFingerprint()
 
       if (response.success && response.slot_number !== null) {
-        // Search for patient with this slot number
+        // Search for patient with this slot number (across all hospitals)
         const patientsQuery = query(
           collection(db, 'patient'),
-          where('fingerprintSlotNumber', '==', response.slot_number),
-          where('addedBy', '==', userData?.hospitalId || '')
+          where('fingerprintSlotNumber', '==', response.slot_number)
         )
         const patientsSnapshot = await getDocs(patientsQuery)
         
         if (patientsSnapshot.empty) {
-          toast.error('Patient not found with this fingerprint', { id: 'search' })
+          toast.error('Patient not found with this fingerprint. Please register the patient as new.', { id: 'search' })
+          setIsSearchingFingerprint(false)
           return
         }
 
@@ -241,21 +764,106 @@ const HospitalDashboard = () => {
           ...patientsSnapshot.docs[0].data()
         }
 
-        // Create log entry
-        await createLog({
-          hospitalId: userData.hospitalId,
-          patientId: patientData.patientId,
-          action: 'SEARCH_BY_FINGERPRINT',
-          remarks: `Searched patient by fingerprint (slot ${response.slot_number})`
-        })
+        // Check if hospital already has access
+        const hasAccess = patientData.associatedHospitals?.includes(userData.hospitalId) || 
+                         patientData.addedBy === userData.hospitalId
 
-        // Show patient details
-        setSelectedPatient(patientData)
-        setModalType('view')
-        setShowModal(true)
-        toast.success('Patient found!', { id: 'search' })
+        // If hospital already has access, show patient details regardless of privacy permission
+        if (hasAccess) {
+          // Update last accessed time
+          if (patientData.hospitalRecords && patientData.hospitalRecords[userData.hospitalId]) {
+            await updateDoc(doc(db, 'patient', patientData.id), {
+              [`hospitalRecords.${userData.hospitalId}.lastAccessed`]: new Date().toISOString(),
+              updatedAt: new Date().toISOString()
+            })
+            // Refresh patient data
+            const updatedPatientDoc = await getDocs(query(
+              collection(db, 'patient'),
+              where('fingerprintSlotNumber', '==', response.slot_number)
+            ))
+            if (!updatedPatientDoc.empty) {
+              const updatedPatient = {
+                id: updatedPatientDoc.docs[0].id,
+                ...updatedPatientDoc.docs[0].data()
+              }
+              setFoundPatientByFingerprint(updatedPatient)
+            } else {
+              setFoundPatientByFingerprint(patientData)
+            }
+          } else {
+            setFoundPatientByFingerprint(patientData)
+          }
+
+          // Create log entry
+          await createLog({
+            hospitalId: userData.hospitalId,
+            patientId: patientData.patientId,
+            action: 'SEARCH_BY_FINGERPRINT',
+            remarks: `Searched patient by fingerprint (slot ${response.slot_number})`
+          })
+
+          toast.success('Patient found!', { id: 'search' })
+          setIsSearchingFingerprint(false)
+          return
+        }
+
+        // Hospital doesn't have access - check privacy permission
+        if (patientData.patientPrivacyPermission === 'no') {
+          // Privacy restricted - ask if they want to send OTP
+          const wantToSendOtp = window.confirm('This patient has privacy restrictions. Do you want to send OTP to the patient\'s registered email?')
+          if (wantToSendOtp) {
+            setFingerprintOtpData({
+              email: patientData.email,
+              otp: '',
+              patientId: patientData.id,
+              patientData: patientData
+            })
+            setIsSendingFingerprintOtp(true)
+            try {
+              await sendOtp(patientData.email)
+              toast.success('OTP sent to patient email!', { id: 'search' })
+            } catch (error) {
+              toast.error(error.message || 'Failed to send OTP', { id: 'search' })
+              setIsSendingFingerprintOtp(false)
+              setIsSearchingFingerprint(false)
+              return
+            } finally {
+              setIsSendingFingerprintOtp(false)
+            }
+          } else {
+            setIsSearchingFingerprint(false)
+            return
+          }
+        } else {
+          // Privacy permission is "yes" - automatically link hospital and show patient details
+          await linkHospitalToPatient(patientData.id, patientData)
+          // Refresh patient data
+          const updatedPatientDoc = await getDocs(query(
+            collection(db, 'patient'),
+            where('fingerprintSlotNumber', '==', response.slot_number)
+          ))
+          if (!updatedPatientDoc.empty) {
+            const updatedPatient = {
+              id: updatedPatientDoc.docs[0].id,
+              ...updatedPatientDoc.docs[0].data()
+            }
+            setFoundPatientByFingerprint(updatedPatient)
+          } else {
+            setFoundPatientByFingerprint(patientData)
+          }
+
+          // Create log entry
+          await createLog({
+            hospitalId: userData.hospitalId,
+            patientId: patientData.patientId,
+            action: 'SEARCH_BY_FINGERPRINT',
+            remarks: `Searched patient by fingerprint (slot ${response.slot_number})`
+          })
+
+          toast.success('Patient found!', { id: 'search' })
+        }
       } else {
-        toast.error('Fingerprint not found in database', { id: 'search' })
+        toast.error('Fingerprint not found in database. Please register the patient as new.', { id: 'search' })
       }
     } catch (error) {
       console.error('Search error:', error)
@@ -263,6 +871,188 @@ const HospitalDashboard = () => {
     } finally {
       setIsSearchingFingerprint(false)
     }
+  }
+
+  const handleVerifyFingerprintOtp = async () => {
+    if (!fingerprintOtpData.otp || fingerprintOtpData.otp.length !== 6) {
+      toast.error('Please enter a valid 6-digit OTP')
+      return
+    }
+
+    setIsVerifyingFingerprintOtp(true)
+    try {
+      await verifyOtp(fingerprintOtpData.email, fingerprintOtpData.otp)
+      
+      // OTP verified - link hospital to patient
+      if (fingerprintOtpData.patientId && fingerprintOtpData.patientData) {
+        await linkHospitalToPatient(fingerprintOtpData.patientId, fingerprintOtpData.patientData)
+        
+        // Create log entry
+        await createLog({
+          hospitalId: userData.hospitalId,
+          patientId: fingerprintOtpData.patientData.patientId,
+          action: 'OTP_VERIFIED_FINGERPRINT_ACCESS',
+          remarks: `OTP verified and access granted for patient via fingerprint: ${fingerprintOtpData.patientData.aadharNumber}`
+        })
+        
+        // Refresh and show patient
+        const updatedPatientDoc = await getDocs(query(
+          collection(db, 'patient'),
+          where('aadharNumber', '==', fingerprintOtpData.patientData.aadharNumber)
+        ))
+        if (!updatedPatientDoc.empty) {
+          const updatedPatient = {
+            id: updatedPatientDoc.docs[0].id,
+            ...updatedPatientDoc.docs[0].data()
+          }
+          setFoundPatientByFingerprint(updatedPatient)
+          setFingerprintOtpData({ email: '', otp: '', patientId: null, patientData: null })
+        }
+        
+        toast.success('OTP verified! Access granted.', { id: 'fingerprint-otp' })
+      }
+    } catch (error) {
+      toast.error(error.message || 'Failed to verify OTP', { id: 'fingerprint-otp' })
+    } finally {
+      setIsVerifyingFingerprintOtp(false)
+    }
+  }
+
+  const handleAddFingerprintNote = async () => {
+    if (!fingerprintNote.trim() || !foundPatientByFingerprint) {
+      toast.error('Please enter a note')
+      return
+    }
+
+    setIsAddingFingerprintNote(true)
+    try {
+      const hospitalId = userData.hospitalId
+      const currentTime = new Date().toISOString()
+      
+      // Get current notes
+      const currentNotes = foundPatientByFingerprint.hospitalRecords?.[hospitalId]?.notes || []
+      
+      // Add new note
+      const newNote = {
+        addedAt: currentTime,
+        note: fingerprintNote.trim(),
+        addedBy: hospitalId,
+        hospitalName: userData.name
+      }
+      
+      const updatedNotes = [...currentNotes, newNote]
+      
+      // Update Firestore
+      await updateDoc(doc(db, 'patient', foundPatientByFingerprint.id), {
+        [`hospitalRecords.${hospitalId}.notes`]: updatedNotes,
+        [`hospitalRecords.${hospitalId}.lastAccessed`]: currentTime,
+        updatedAt: currentTime
+      })
+      
+      // Create log entry
+      await createLog({
+        hospitalId: userData.hospitalId,
+        patientId: foundPatientByFingerprint.patientId,
+        action: 'ADD_NOTE',
+        remarks: `Added note for patient via fingerprint: ${foundPatientByFingerprint.aadharNumber}`
+      })
+      
+      // Refresh patient data
+      const updatedPatientDoc = await getDocs(query(
+        collection(db, 'patient'),
+        where('fingerprintSlotNumber', '==', foundPatientByFingerprint.fingerprintSlotNumber)
+      ))
+      if (!updatedPatientDoc.empty) {
+        const updatedPatient = {
+          id: updatedPatientDoc.docs[0].id,
+          ...updatedPatientDoc.docs[0].data()
+        }
+        setFoundPatientByFingerprint(updatedPatient)
+      }
+      
+      setFingerprintNote('')
+      toast.success('Note added successfully!')
+    } catch (error) {
+      console.error('Error adding note:', error)
+      toast.error('Failed to add note')
+    } finally {
+      setIsAddingFingerprintNote(false)
+    }
+  }
+
+  const handleImageUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select a valid image file')
+      return
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size should be less than 5MB')
+      return
+    }
+
+    // Convert to base64
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const base64String = reader.result
+      setPatientImage(base64String)
+      setPatientImagePreview(base64String)
+      toast.success('Image uploaded successfully!')
+    }
+    reader.onerror = () => {
+      toast.error('Failed to read image file')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleEditImageUpload = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select a valid image file')
+      return
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image size should be less than 5MB')
+      return
+    }
+
+    // Convert to base64
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      const base64String = reader.result
+      setEditForm({...editForm, patientImage: base64String})
+      setPatientImagePreview(base64String)
+      toast.success('Image updated successfully!')
+    }
+    reader.onerror = () => {
+      toast.error('Failed to read image file')
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const removeImage = () => {
+    setPatientImage(null)
+    setPatientImagePreview(null)
+    if (imageInputRef.current) {
+      imageInputRef.current.value = ''
+    }
+    toast.success('Image removed')
+  }
+
+  const removeEditImage = () => {
+    setEditForm({...editForm, patientImage: null})
+    setPatientImagePreview(null)
+    toast.success('Image removed')
   }
 
   const handlePasswordChange = async () => {
@@ -321,6 +1111,25 @@ const HospitalDashboard = () => {
 
   const patientColumns = [
     {
+      header: 'Photo',
+      key: 'patientImage',
+      render: (value) => (
+        <div className="flex items-center justify-center">
+          {value ? (
+            <img 
+              src={value} 
+              alt="Patient" 
+              className="w-10 h-10 rounded-full object-cover border-2 border-gray-200"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+              <User className="w-5 h-5 text-gray-400" />
+            </div>
+          )}
+        </div>
+      )
+    },
+    {
       header: 'Patient Name',
       key: 'patientName'
     },
@@ -376,12 +1185,15 @@ const HospitalDashboard = () => {
                 aadharNumber: row.aadharNumber || '',
                 email: row.email || '',
                 mobileNumber: row.mobileNumber || '',
+                relativesNumber: row.relativesNumber || '',
                 bloodGroup: row.bloodGroup || '',
                 anyAllergy: row.anyAllergy || '',
                 anyDisease: row.anyDisease || '',
                 pastOperation: row.pastOperation || '',
-                patientPrivacyPermission: row.patientPrivacyPermission || 'no'
+                patientPrivacyPermission: row.patientPrivacyPermission || 'no',
+                patientImage: row.patientImage || null
               })
+              setPatientImagePreview(row.patientImage || null)
               setShowModal(true)
             }}
             className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors"
@@ -453,9 +1265,22 @@ const HospitalDashboard = () => {
         <div className="space-y-3">
           {patients.slice(0, 5).map((patient, index) => (
             <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-              <div>
-                <p className="font-medium text-gray-800">{patient.patientName || 'N/A'}</p>
-                <p className="text-sm text-gray-500">{patient.aadharNumber} • {patient.email}</p>
+              <div className="flex items-center space-x-3">
+                {patient.patientImage ? (
+                  <img 
+                    src={patient.patientImage} 
+                    alt={patient.patientName || 'Patient'} 
+                    className="w-12 h-12 rounded-full object-cover border-2 border-gray-200"
+                  />
+                ) : (
+                  <div className="w-12 h-12 rounded-full bg-gray-200 flex items-center justify-center">
+                    <User className="w-6 h-6 text-gray-400" />
+                  </div>
+                )}
+                <div>
+                  <p className="font-medium text-gray-800">{patient.patientName || 'N/A'}</p>
+                  <p className="text-sm text-gray-500">{patient.aadharNumber} • {patient.email}</p>
+                </div>
               </div>
               <span className="px-2 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
                 {patient.bloodGroup}
@@ -467,29 +1292,226 @@ const HospitalDashboard = () => {
     </div>
   )
 
-  const renderAddPatient = () => (
-    <div className="bg-white rounded-xl p-6 shadow-lg">
-      <h3 className="text-lg font-semibold text-gray-800 mb-6">Add New Patient</h3>
-      <form 
-        ref={addPatientFormRef}
-        onSubmit={(e) => {
-          e.preventDefault()
-          const formData = new FormData(e.target)
-          const patientData = {
-            patientName: formData.get('patientName'),
-            aadharNumber: formData.get('aadharNumber'),
-            email: formData.get('email'),
-            mobileNumber: formData.get('mobileNumber'),
-            bloodGroup: formData.get('bloodGroup'),
-            anyAllergy: formData.get('anyAllergy'),
-            anyDisease: formData.get('anyDisease'),
-            pastOperation: formData.get('pastOperation'),
-            patientPrivacyPermission: formData.get('patientPrivacyPermission')
-          }
-          handleAddPatient(patientData, e.target)
-        }} 
-        className="space-y-4"
-      >
+  const renderAddPatient = () => {
+    // Step 1: Aadhaar Search (if patient not found and registration form not shown)
+    if (!showRegistrationForm && !foundPatientForAdd) {
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <h3 className="text-lg font-semibold text-gray-800 mb-6">Add New Patient</h3>
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-blue-800">
+                <strong>Step 1:</strong> Enter the patient's Aadhaar number to check if they already exist in the system.
+              </p>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Aadhaar Number
+                <span className="text-red-500 ml-1">*</span>
+              </label>
+              <input
+                type="text"
+                value={addPatientAadhar}
+                onChange={(e) => setAddPatientAadhar(e.target.value.replace(/\D/g, '').slice(0, 12))}
+                placeholder="Enter 12-digit Aadhaar number"
+                maxLength={12}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            
+            <button
+              type="button"
+              onClick={handleSearchAadharForAdd}
+              disabled={isSearchingAadhar || addPatientAadhar.length !== 12}
+              className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+            >
+              {isSearchingAadhar ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Searching...</span>
+                </>
+              ) : (
+                <>
+                  <Search className="w-5 h-5" />
+                  <span>Search Patient</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    // Step 2: Patient Found - Show Patient Data and Notes
+    if (foundPatientForAdd) {
+      const hospitalId = userData.hospitalId
+      const hospitalNotes = foundPatientForAdd.hospitalRecords?.[hospitalId]?.notes || []
+      const hasAccess = foundPatientForAdd.associatedHospitals?.includes(hospitalId) || 
+                       foundPatientForAdd.addedBy === hospitalId
+      
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <h3 className="text-lg font-semibold text-gray-800 mb-6">Patient Found</h3>
+          
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-green-800">
+              ✅ Patient with Aadhaar number <strong>{foundPatientForAdd.aadharNumber}</strong> exists in the system.
+              {hasAccess ? ' You have access to this patient.' : ' Linking hospital...'}
+            </p>
+          </div>
+
+          {/* Patient Details */}
+          <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
+            <h4 className="text-md font-semibold text-gray-800 mb-4">Patient Details</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
+                <p className="text-gray-900 font-medium">{foundPatientForAdd.patientName || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Aadhaar Number</label>
+                <p className="text-gray-900 font-medium">{foundPatientForAdd.aadharNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <p className="text-gray-900 font-medium">{foundPatientForAdd.email || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
+                <p className="text-gray-900 font-medium">{foundPatientForAdd.mobileNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Blood Group</label>
+                <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                  {foundPatientForAdd.bloodGroup || 'N/A'}
+                </span>
+              </div>
+              {foundPatientForAdd.relativesNumber && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Relatives Number</label>
+                  <p className="text-gray-900 font-medium">{foundPatientForAdd.relativesNumber}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Add Note Section */}
+          {hasAccess && (
+            <div className="bg-blue-50 rounded-lg p-4 mb-6 border border-blue-200">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Add Treatment Note
+              </label>
+              <textarea
+                value={patientNote}
+                onChange={(e) => setPatientNote(e.target.value)}
+                placeholder="Enter treatment note or summary..."
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              />
+              <button
+                type="button"
+                onClick={handleAddNote}
+                disabled={isAddingNote || !patientNote.trim()}
+                className="mt-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+              >
+                {isAddingNote ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Adding...</span>
+                  </>
+                ) : (
+                  <span>Add Note</span>
+                )}
+              </button>
+            </div>
+          )}
+
+          {/* Display Notes */}
+          {hasAccess && hospitalNotes.length > 0 && (
+            <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
+              <h4 className="text-md font-semibold text-gray-800 mb-4">Treatment Notes</h4>
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {hospitalNotes.map((note, index) => (
+                  <div key={index} className="bg-white rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-gray-500">
+                        {new Date(note.addedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-gray-700 text-sm whitespace-pre-wrap">{note.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setFoundPatientForAdd(null)
+              setAddPatientAadhar('')
+              setShowRegistrationForm(false)
+              setPatientNote('')
+            }}
+            className="w-full px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg"
+          >
+            Search Another Patient
+          </button>
+        </div>
+      )
+    }
+
+    // Step 3: Registration Form (if patient not found)
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-lg">
+        <h3 className="text-lg font-semibold text-gray-800 mb-6">Register New Patient</h3>
+        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-yellow-800">
+            Patient with Aadhaar number <strong>{addPatientAadhar}</strong> not found. Please fill in the details to register a new patient.
+          </p>
+        </div>
+        
+        <button
+          type="button"
+          onClick={() => {
+            setShowRegistrationForm(false)
+            setAddPatientAadhar('')
+            setFoundPatientForAdd(null)
+          }}
+          className="mb-4 text-blue-600 hover:text-blue-800 transition-colors flex items-center space-x-2"
+        >
+          <Search className="w-4 h-4" />
+          <span>Search Again</span>
+        </button>
+        
+        <form 
+          ref={addPatientFormRef}
+          onSubmit={(e) => {
+            e.preventDefault()
+            const formData = new FormData(e.target)
+            const patientData = {
+              patientName: formData.get('patientName'),
+              aadharNumber: addPatientAadhar, // Use searched Aadhaar
+              email: formData.get('email'),
+              mobileNumber: formData.get('mobileNumber'),
+              relativesNumber: formData.get('relativesNumber'),
+              bloodGroup: formData.get('bloodGroup'),
+              anyAllergy: formData.get('anyAllergy'),
+              anyDisease: formData.get('anyDisease'),
+              pastOperation: formData.get('pastOperation'),
+              patientPrivacyPermission: formData.get('patientPrivacyPermission')
+            }
+            handleAddPatient(patientData, e.target)
+          }} 
+          className="space-y-4"
+        >
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormInput
             label="Patient Name"
@@ -521,12 +1543,66 @@ const HospitalDashboard = () => {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormInput
+            label="Relatives Number"
+            name="relativesNumber"
+            placeholder="Enter relative's contact number"
+          />
+          <FormInput
             label="Blood Group"
             name="bloodGroup"
             placeholder="e.g., A+, B-, O+, AB-"
             required
           />
         </div>
+        
+        {/* Patient Image Upload */}
+        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+          <label className="block text-sm font-medium text-gray-700 mb-3">
+            Patient Photo (Optional)
+          </label>
+          <div className="flex items-center space-x-4">
+            {patientImagePreview ? (
+              <div className="relative">
+                <img 
+                  src={patientImagePreview} 
+                  alt="Patient preview" 
+                  className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-lg"
+                />
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                  title="Remove image"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center border-4 border-dashed border-gray-300">
+                <ImageIcon className="w-8 h-8 text-gray-400" />
+              </div>
+            )}
+            <div className="flex-1">
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+                id="patient-image-upload"
+              />
+              <label
+                htmlFor="patient-image-upload"
+                className="cursor-pointer inline-flex items-center space-x-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+              >
+                <Upload className="w-4 h-4" />
+                <span>{patientImagePreview ? 'Change Photo' : 'Upload Photo'}</span>
+              </label>
+              <p className="text-xs text-gray-500 mt-2">Max size: 5MB</p>
+            </div>
+          </div>
+        </div>
+        
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <FormInput
             label="Any Allergy"
@@ -636,74 +1712,511 @@ const HospitalDashboard = () => {
       </form>
     </div>
   )
+  }
+  const renderAccessPatient = () => {
+    // Show patient data if accessed (and not pending OTP)
+    if (accessPatientData && !accessPatientData._pendingOtp) {
+      const hospitalId = userData.hospitalId
+      const hasAccess = accessPatientData.associatedHospitals?.includes(hospitalId) || 
+                       accessPatientData.addedBy === hospitalId
+      const hospitalNotes = accessPatientData.hospitalRecords?.[hospitalId]?.notes || []
 
-  const renderAccessPatient = () => (
-    <div className="bg-white rounded-xl p-6 shadow-lg">
-      <h3 className="text-lg font-semibold text-gray-800 mb-6">Access Patient Data</h3>
-      <form onSubmit={(e) => {
-        e.preventDefault()
-        handleAccessPatient(accessForm)
-      }} className="space-y-4">
-        <FormInput
-          label="Aadhaar Number"
-          value={accessForm.aadharNumber}
-          onChange={(e) => setAccessForm({...accessForm, aadharNumber: e.target.value})}
-          placeholder="Enter 12-digit Aadhaar number"
-          required
-        />
-        <FormInput
-          label="Email"
-          type="email"
-          value={accessForm.email}
-          onChange={(e) => setAccessForm({...accessForm, email: e.target.value})}
-          placeholder="patient@example.com"
-          required
-        />
-        <button
-          type="submit"
-          className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
-        >
-          Send OTP to Patient
-        </button>
-      </form>
-    </div>
-  )
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <h3 className="text-lg font-semibold text-gray-800 mb-6">Patient Data</h3>
+          
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-green-800">
+              ✅ Patient data accessed successfully
+            </p>
+          </div>
 
-  const renderSearchFingerprint = () => (
-    <div className="bg-white rounded-xl p-6 shadow-lg">
-      <div className="flex items-center space-x-2 mb-6">
-        <Fingerprint className="w-6 h-6 text-purple-600" />
-        <h3 className="text-lg font-semibold text-gray-800">Search Patient by Fingerprint</h3>
-      </div>
-      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-        <p className="text-sm text-blue-800">
-          <strong>Instructions:</strong> Place the patient's finger on the scanner to search for their records in the database.
-        </p>
-      </div>
-      <div className="space-y-4">
-        <button
-          onClick={handleSearchFingerprint}
-          disabled={isSearchingFingerprint}
-          className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-        >
-          {isSearchingFingerprint ? (
-            <>
-              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-              <span>Searching...</span>
-            </>
-          ) : (
-            <>
-              <Fingerprint className="w-5 h-5" />
-              <span>Scan Fingerprint</span>
-            </>
+          {/* Patient Details */}
+          <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
+            <h4 className="text-md font-semibold text-gray-800 mb-4">Patient Details</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
+                <p className="text-gray-900 font-medium">{accessPatientData.patientName || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Aadhaar Number</label>
+                <p className="text-gray-900 font-medium">{accessPatientData.aadharNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <p className="text-gray-900 font-medium">{accessPatientData.email || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
+                <p className="text-gray-900 font-medium">{accessPatientData.mobileNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Relatives Number</label>
+                <p className="text-gray-900 font-medium">{accessPatientData.relativesNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Blood Group</label>
+                <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                  {accessPatientData.bloodGroup || 'N/A'}
+                </span>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Any Allergy</label>
+                <p className="text-gray-900">{accessPatientData.anyAllergy || 'None'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Any Disease</label>
+                <p className="text-gray-900">{accessPatientData.anyDisease || 'None'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Past Operation</label>
+                <p className="text-gray-900">{accessPatientData.pastOperation || 'None'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Add Note Section - Show if hospital has access */}
+          {hasAccess && (
+            <div className="bg-blue-50 rounded-lg p-4 mb-6 border border-blue-200">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Add Treatment Note
+              </label>
+              <textarea
+                value={accessPatientNote}
+                onChange={(e) => setAccessPatientNote(e.target.value)}
+                placeholder="Enter treatment note or summary..."
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              />
+              <button
+                type="button"
+                onClick={handleAddAccessNote}
+                disabled={isAddingAccessNote || !accessPatientNote.trim()}
+                className="mt-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+              >
+                {isAddingAccessNote ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Adding...</span>
+                  </>
+                ) : (
+                  <span>Add Note</span>
+                )}
+              </button>
+            </div>
           )}
-        </button>
+
+          {/* Display Notes */}
+          {hasAccess && hospitalNotes.length > 0 && (
+            <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
+              <h4 className="text-md font-semibold text-gray-800 mb-4">Treatment Notes</h4>
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {hospitalNotes.map((note, index) => (
+                  <div key={index} className="bg-white rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-gray-500">
+                        {new Date(note.addedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-gray-700 text-sm whitespace-pre-wrap">{note.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setAccessPatientData(null)
+              setAccessForm({ aadharNumber: '', email: '' })
+              setAccessPatientOtp('')
+              setAccessPatientNote('')
+            }}
+            className="w-full px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg"
+          >
+            Search Another Patient
+          </button>
+        </div>
+      )
+    }
+
+    // Show OTP input if OTP was sent (patient data exists but is pending OTP)
+    const showOtpInput = accessPatientData && accessPatientData._pendingOtp
+
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-lg">
+        <h3 className="text-lg font-semibold text-gray-800 mb-6">Access Patient Data</h3>
+        
+        {!showOtpInput ? (
+          <form onSubmit={(e) => {
+            e.preventDefault()
+            handleAccessPatient(accessForm)
+          }} className="space-y-4">
+            <FormInput
+              label="Aadhaar Number"
+              value={accessForm.aadharNumber}
+              onChange={(e) => setAccessForm({...accessForm, aadharNumber: e.target.value.replace(/\D/g, '').slice(0, 12)})}
+              placeholder="Enter 12-digit Aadhaar number"
+              required
+            />
+            <FormInput
+              label="Email"
+              type="email"
+              value={accessForm.email}
+              onChange={(e) => setAccessForm({...accessForm, email: e.target.value})}
+              placeholder="patient@example.com"
+              required
+            />
+            <button
+              type="submit"
+              disabled={isSendingAccessOtp}
+              className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+            >
+              {isSendingAccessOtp ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Processing...</span>
+                </>
+              ) : (
+                <span>Send OTP to Patient</span>
+              )}
+            </button>
+          </form>
+        ) : (
+          <div className="space-y-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-blue-800">
+                An OTP has been sent to <strong>{accessForm.email}</strong>. Please enter the OTP to verify and access patient details.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter OTP
+                <span className="text-red-500 ml-1">*</span>
+              </label>
+              <input
+                type="text"
+                value={accessPatientOtp}
+                onChange={(e) => setAccessPatientOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="Enter 6-digit OTP"
+                maxLength={6}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+
+            <div className="flex space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setAccessForm({ aadharNumber: '', email: '' })
+                  setAccessPatientOtp('')
+                }}
+                className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsSendingAccessOtp(true)
+                  try {
+                    await sendOtp(accessForm.email)
+                    toast.success('OTP resent to patient email!')
+                  } catch (error) {
+                    toast.error(error.message || 'Failed to resend OTP')
+                  } finally {
+                    setIsSendingAccessOtp(false)
+                  }
+                }}
+                disabled={isSendingAccessOtp}
+                className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg disabled:opacity-50"
+              >
+                {isSendingAccessOtp ? 'Sending...' : 'Resend OTP'}
+              </button>
+              <button
+                type="button"
+                onClick={handleVerifyAccessOtp}
+                disabled={isVerifyingAccessOtp || accessPatientOtp.length !== 6}
+                className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+              >
+                {isVerifyingAccessOtp ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <span>Verify OTP</span>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
-  )
+    )
+  }
+
+  const renderSearchFingerprint = () => {
+    // Show OTP input if OTP was sent
+    if (fingerprintOtpData.email && fingerprintOtpData.patientData) {
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <div className="flex items-center space-x-2 mb-6">
+            <Fingerprint className="w-6 h-6 text-purple-600" />
+            <h3 className="text-lg font-semibold text-gray-800">OTP Verification</h3>
+          </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-blue-800">
+              An OTP has been sent to <strong>{fingerprintOtpData.email}</strong>. Please enter the OTP to verify and access patient details.
+            </p>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Enter OTP
+                <span className="text-red-500 ml-1">*</span>
+              </label>
+              <input
+                type="text"
+                value={fingerprintOtpData.otp}
+                onChange={(e) => setFingerprintOtpData({ ...fingerprintOtpData, otp: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+                placeholder="Enter 6-digit OTP"
+                maxLength={6}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div className="flex space-x-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setFingerprintOtpData({ email: '', otp: '', patientId: null, patientData: null })
+                  setFoundPatientByFingerprint(null)
+                }}
+                className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsSendingFingerprintOtp(true)
+                  try {
+                    await sendOtp(fingerprintOtpData.email)
+                    toast.success('OTP resent to patient email!')
+                  } catch (error) {
+                    toast.error(error.message || 'Failed to resend OTP')
+                  } finally {
+                    setIsSendingFingerprintOtp(false)
+                  }
+                }}
+                disabled={isSendingFingerprintOtp}
+                className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg disabled:opacity-50"
+              >
+                {isSendingFingerprintOtp ? 'Sending...' : 'Resend OTP'}
+              </button>
+              <button
+                type="button"
+                onClick={handleVerifyFingerprintOtp}
+                disabled={isVerifyingFingerprintOtp || fingerprintOtpData.otp.length !== 6}
+                className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+              >
+                {isVerifyingFingerprintOtp ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Verifying...</span>
+                  </>
+                ) : (
+                  <span>Verify OTP</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    // Show patient details if found
+    if (foundPatientByFingerprint) {
+      const hospitalId = userData.hospitalId
+      const hospitalNotes = foundPatientByFingerprint.hospitalRecords?.[hospitalId]?.notes || []
+      const hasAccess = foundPatientByFingerprint.associatedHospitals?.includes(hospitalId) || 
+                       foundPatientByFingerprint.addedBy === hospitalId
+
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <div className="flex items-center space-x-2 mb-6">
+            <Fingerprint className="w-6 h-6 text-purple-600" />
+            <h3 className="text-lg font-semibold text-gray-800">Patient Found</h3>
+          </div>
+          
+          <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-green-800">
+              ✅ Patient found with fingerprint slot <strong>{foundPatientByFingerprint.fingerprintSlotNumber}</strong>
+            </p>
+          </div>
+
+          {/* Patient Details */}
+          <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
+            <h4 className="text-md font-semibold text-gray-800 mb-4">Patient Details</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
+                <p className="text-gray-900 font-medium">{foundPatientByFingerprint.patientName || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Aadhaar Number</label>
+                <p className="text-gray-900 font-medium">{foundPatientByFingerprint.aadharNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <p className="text-gray-900 font-medium">{foundPatientByFingerprint.email || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
+                <p className="text-gray-900 font-medium">{foundPatientByFingerprint.mobileNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Relatives Number</label>
+                <p className="text-gray-900 font-medium">{foundPatientByFingerprint.relativesNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Blood Group</label>
+                <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                  {foundPatientByFingerprint.bloodGroup || 'N/A'}
+                </span>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Any Allergy</label>
+                <p className="text-gray-900">{foundPatientByFingerprint.anyAllergy || 'None'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Any Disease</label>
+                <p className="text-gray-900">{foundPatientByFingerprint.anyDisease || 'None'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Past Operation</label>
+                <p className="text-gray-900">{foundPatientByFingerprint.pastOperation || 'None'}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Add Note Section - Always show when patient is found */}
+          <div className="bg-blue-50 rounded-lg p-4 mb-6 border border-blue-200">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Add Treatment Note
+            </label>
+            <textarea
+              value={fingerprintNote}
+              onChange={(e) => setFingerprintNote(e.target.value)}
+              placeholder="Enter treatment note or summary..."
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+            />
+            <button
+              type="button"
+              onClick={handleAddFingerprintNote}
+              disabled={isAddingFingerprintNote || !fingerprintNote.trim()}
+              className="mt-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+            >
+              {isAddingFingerprintNote ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Adding...</span>
+                </>
+              ) : (
+                <span>Add Note</span>
+              )}
+            </button>
+          </div>
+
+          {/* Display Notes */}
+          {hasAccess && hospitalNotes.length > 0 && (
+            <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
+              <h4 className="text-md font-semibold text-gray-800 mb-4">Treatment Notes</h4>
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {hospitalNotes.map((note, index) => (
+                  <div key={index} className="bg-white rounded-lg p-3 border border-gray-200">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-gray-500">
+                        {new Date(note.addedAt).toLocaleString()}
+                      </span>
+                    </div>
+                    <p className="text-gray-700 text-sm whitespace-pre-wrap">{note.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              setFoundPatientByFingerprint(null)
+              setFingerprintOtpData({ email: '', otp: '', patientId: null, patientData: null })
+              setFingerprintNote('')
+            }}
+            className="w-full px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg"
+          >
+            Search Another Patient
+          </button>
+        </div>
+      )
+    }
+
+    // Initial state - show scan button
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-lg">
+        <div className="flex items-center space-x-2 mb-6">
+          <Fingerprint className="w-6 h-6 text-purple-600" />
+          <h3 className="text-lg font-semibold text-gray-800">Search Patient by Fingerprint</h3>
+        </div>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+          <p className="text-sm text-blue-800">
+            <strong>Instructions:</strong> Place the patient's finger on the scanner to search for their records in the database.
+          </p>
+        </div>
+        <div className="space-y-4">
+          <button
+            onClick={handleSearchFingerprint}
+            disabled={isSearchingFingerprint}
+            className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
+            {isSearchingFingerprint ? (
+              <>
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Searching...</span>
+              </>
+            ) : (
+              <>
+                <Fingerprint className="w-5 h-5" />
+                <span>Scan Fingerprint</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const renderManagePatients = () => (
     <div className="space-y-6">
@@ -863,12 +2376,27 @@ const HospitalDashboard = () => {
           setShowModal(false)
           setSelectedPatient(null)
           setModalType('')
+          setPatientImagePreview(null)
         }}
         title={modalType === 'view' ? 'Patient Details' : 'Edit Patient'}
         size="lg"
       >
         {modalType === 'view' ? (
           <div className="space-y-4">
+            {/* Patient Image */}
+            <div className="flex justify-center mb-4">
+              {selectedPatient?.patientImage ? (
+                <img 
+                  src={selectedPatient.patientImage} 
+                  alt={selectedPatient?.patientName || 'Patient'} 
+                  className="w-32 h-32 rounded-full object-cover border-4 border-blue-200 shadow-lg"
+                />
+              ) : (
+                <div className="w-32 h-32 rounded-full bg-gray-200 flex items-center justify-center border-4 border-gray-300">
+                  <User className="w-16 h-16 text-gray-400" />
+                </div>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Patient Name</label>
@@ -885,6 +2413,10 @@ const HospitalDashboard = () => {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number</label>
                 <p className="text-gray-900 font-medium">{selectedPatient?.mobileNumber || 'N/A'}</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Relatives Number</label>
+                <p className="text-gray-900 font-medium">{selectedPatient?.relativesNumber || 'N/A'}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Blood Group</label>
@@ -941,6 +2473,54 @@ const HospitalDashboard = () => {
                 </p>
               </div>
             </div>
+
+            {/* Treatment Notes Section */}
+            {selectedPatient?.hospitalRecords && (
+              <div className="mt-6 border-t pt-6">
+                <h3 className="text-lg font-semibold text-gray-800 mb-4">Treatment Notes</h3>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {(() => {
+                    // Collect all notes from all hospitals
+                    const allNotes = []
+                    Object.entries(selectedPatient.hospitalRecords).forEach(([hospitalId, record]) => {
+                      const notes = record?.notes || []
+                      if (Array.isArray(notes)) {
+                        notes.forEach((note, index) => {
+                          allNotes.push({
+                            ...note,
+                            hospitalId,
+                            uniqueKey: `${hospitalId}-${index}`
+                          })
+                        })
+                      }
+                    })
+                    
+                    // Sort by date (newest first)
+                    allNotes.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))
+                    
+                    if (allNotes.length === 0) {
+                      return (
+                        <p className="text-gray-500 text-sm text-center py-4">No treatment notes available.</p>
+                      )
+                    }
+                    
+                    return allNotes.map((note) => (
+                      <div key={note.uniqueKey} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-semibold text-gray-800">
+                            {note.hospitalName || 'Hospital'}
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {new Date(note.addedAt).toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-gray-700 text-sm whitespace-pre-wrap">{note.note}</p>
+                      </div>
+                    ))
+                  })()}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
@@ -948,31 +2528,92 @@ const HospitalDashboard = () => {
               e.preventDefault()
               handleUpdatePatient()
             }}>
+              {/* Patient Image Upload in Edit */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-3">
+                  Patient Photo
+                </label>
+                <div className="flex items-center space-x-4">
+                  {patientImagePreview ? (
+                    <div className="relative">
+                      <img 
+                        src={patientImagePreview} 
+                        alt="Patient preview" 
+                        className="w-24 h-24 rounded-full object-cover border-4 border-white shadow-lg"
+                      />
+                      <button
+                        type="button"
+                        onClick={removeEditImage}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                        title="Remove image"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center border-4 border-dashed border-gray-300">
+                      <ImageIcon className="w-8 h-8 text-gray-400" />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleEditImageUpload}
+                      className="hidden"
+                      id="edit-patient-image-upload"
+                    />
+                    <label
+                      htmlFor="edit-patient-image-upload"
+                      className="cursor-pointer inline-flex items-center space-x-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>{patientImagePreview ? 'Change Photo' : 'Upload Photo'}</span>
+                    </label>
+                    <p className="text-xs text-gray-500 mt-2">Max size: 5MB</p>
+                  </div>
+                </div>
+              </div>
+              
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormInput
-                  label="Patient Name"
-                  value={editForm.patientName}
-                  onChange={(e) => setEditForm({...editForm, patientName: e.target.value})}
-                  placeholder="Enter patient full name"
-                  required
-                />
-                <FormInput
-                  label="Aadhaar Number"
-                  value={editForm.aadharNumber}
-                  onChange={(e) => setEditForm({...editForm, aadharNumber: e.target.value})}
-                  placeholder="Enter 12-digit Aadhaar number"
-                  required
-                />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Patient Name
+                    <span className="text-red-500 ml-1">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.patientName}
+                    disabled
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Aadhaar Number
+                    <span className="text-red-500 ml-1">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.aadharNumber}
+                    disabled
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormInput
-                  label="Email"
-                  type="email"
-                  value={editForm.email}
-                  onChange={(e) => setEditForm({...editForm, email: e.target.value})}
-                  placeholder="patient@example.com"
-                  required
-                />
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Email
+                    <span className="text-red-500 ml-1">*</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={editForm.email}
+                    disabled
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-600 cursor-not-allowed"
+                  />
+                </div>
                 <FormInput
                   label="Mobile Number"
                   value={editForm.mobileNumber}
@@ -982,6 +2623,12 @@ const HospitalDashboard = () => {
                 />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <FormInput
+                  label="Relatives Number"
+                  value={editForm.relativesNumber}
+                  onChange={(e) => setEditForm({...editForm, relativesNumber: e.target.value})}
+                  placeholder="Enter relative's contact number"
+                />
                 <FormInput
                   label="Blood Group"
                   value={editForm.bloodGroup}
@@ -1045,6 +2692,112 @@ const HospitalDashboard = () => {
                 </div>
               </div>
 
+              {/* Add Note Section */}
+              <div className="bg-blue-50 rounded-lg p-4 border border-blue-200 mt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Add Treatment Note
+                </label>
+                <textarea
+                  value={editPatientNote}
+                  onChange={(e) => setEditPatientNote(e.target.value)}
+                  placeholder="Enter treatment note or summary..."
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!editPatientNote.trim() || !selectedPatient) {
+                      toast.error('Please enter a note')
+                      return
+                    }
+
+                    setIsAddingEditNote(true)
+                    try {
+                      const hospitalId = userData.hospitalId
+                      const currentTime = new Date().toISOString()
+                      
+                      // Get current notes
+                      const currentNotes = selectedPatient.hospitalRecords?.[hospitalId]?.notes || []
+                      
+                      // Add new note
+                      const newNote = {
+                        addedAt: currentTime,
+                        note: editPatientNote.trim(),
+                        addedBy: hospitalId,
+                        hospitalName: userData.name
+                      }
+                      
+                      const updatedNotes = [...currentNotes, newNote]
+                      
+                      // Update Firestore
+                      await updateDoc(doc(db, 'patient', selectedPatient.id || selectedPatient.patientId), {
+                        [`hospitalRecords.${hospitalId}.notes`]: updatedNotes,
+                        [`hospitalRecords.${hospitalId}.lastAccessed`]: currentTime,
+                        updatedAt: currentTime
+                      })
+                      
+                      // Create log entry
+                      await createLog({
+                        hospitalId: userData.hospitalId,
+                        patientId: selectedPatient.patientId || selectedPatient.id,
+                        action: 'ADD_NOTE',
+                        remarks: `Added note for patient: ${selectedPatient.aadharNumber}`
+                      })
+                      
+                      // Refresh patient data
+                      const updatedPatientDoc = await getDocs(query(
+                        collection(db, 'patient'),
+                        where('aadharNumber', '==', selectedPatient.aadharNumber)
+                      ))
+                      if (!updatedPatientDoc.empty) {
+                        const updatedPatient = {
+                          id: updatedPatientDoc.docs[0].id,
+                          ...updatedPatientDoc.docs[0].data()
+                        }
+                        setSelectedPatient(updatedPatient)
+                        // Update editForm with latest patient data
+                        setEditForm({
+                          patientName: updatedPatient.patientName || '',
+                          aadharNumber: updatedPatient.aadharNumber || '',
+                          email: updatedPatient.email || '',
+                          mobileNumber: updatedPatient.mobileNumber || '',
+                          relativesNumber: updatedPatient.relativesNumber || '',
+                          bloodGroup: updatedPatient.bloodGroup || '',
+                          anyAllergy: updatedPatient.anyAllergy || '',
+                          anyDisease: updatedPatient.anyDisease || '',
+                          pastOperation: updatedPatient.pastOperation || '',
+                          patientPrivacyPermission: updatedPatient.patientPrivacyPermission || 'no',
+                          patientImage: updatedPatient.patientImage || null
+                        })
+                      }
+                      
+                      setEditPatientNote('')
+                      toast.success('Note added successfully!')
+                    } catch (error) {
+                      console.error('Error adding note:', error)
+                      toast.error('Failed to add note')
+                    } finally {
+                      setIsAddingEditNote(false)
+                    }
+                  }}
+                  disabled={isAddingEditNote || !editPatientNote.trim()}
+                  className="mt-2 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                >
+                  {isAddingEditNote ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Adding...</span>
+                    </>
+                  ) : (
+                    <span>Add Note</span>
+                  )}
+                </button>
+              </div>
+
               <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"
@@ -1052,6 +2805,8 @@ const HospitalDashboard = () => {
                     setShowModal(false)
                     setSelectedPatient(null)
                     setModalType('')
+                    setPatientImagePreview(null)
+                    setEditPatientNote('')
                   }}
                   className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
                 >
@@ -1135,6 +2890,79 @@ const HospitalDashboard = () => {
               className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
               Change Password
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* OTP Verification Modal */}
+      <Modal
+        isOpen={showOtpModal}
+        onClose={() => {
+          setShowOtpModal(false)
+          setOtpData({ email: '', otp: '', patientId: null, patientData: null })
+        }}
+        title="OTP Verification"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              An OTP has been sent to <strong>{otpData.email}</strong>. Please enter the OTP to verify and link this hospital to the patient.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Enter OTP
+              <span className="text-red-500 ml-1">*</span>
+            </label>
+            <input
+              type="text"
+              value={otpData.otp}
+              onChange={(e) => setOtpData({ ...otpData, otp: e.target.value.replace(/\D/g, '').slice(0, 6) })}
+              placeholder="Enter 6-digit OTP"
+              maxLength={6}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          <div className="flex space-x-3">
+            <button
+              type="button"
+              onClick={() => {
+                setShowOtpModal(false)
+                setOtpData({ email: '', otp: '', patientId: null, patientData: null })
+              }}
+              className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSendOtp(otpData.email)}
+              disabled={isSendingOtp}
+              className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg disabled:opacity-50"
+            >
+              {isSendingOtp ? 'Sending...' : 'Resend OTP'}
+            </button>
+            <button
+              type="button"
+              onClick={handleVerifyOtp}
+              disabled={isVerifyingOtp || otpData.otp.length !== 6}
+              className="flex-1 bg-gradient-to-r from-blue-500 to-blue-600 text-white px-4 py-2 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+            >
+              {isVerifyingOtp ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Verifying...</span>
+                </>
+              ) : (
+                <span>Verify OTP</span>
+              )}
             </button>
           </div>
         </div>
