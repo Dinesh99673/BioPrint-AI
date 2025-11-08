@@ -31,7 +31,7 @@ import axios from 'axios'
 import { updatePassword } from 'firebase/auth'
 import { auth } from '../../firebase/config'
 import { cleanupGeneratedPassword, isUsingGeneratedPassword, validatePassword } from '../../utils/hospitalAuth'
-import { enrollFingerprint, searchFingerprint, sendOtp, verifyOtp, sendEmail } from '../../utils/api'
+import { enrollFingerprint, searchFingerprint, sendOtp, verifyOtp, sendEmail, predictBloodGroup, captureAndPredict } from '../../utils/api'
 
 const HospitalDashboard = () => {
   const [activeTab, setActiveTab] = useState('overview')
@@ -81,6 +81,13 @@ const HospitalDashboard = () => {
   const [isAddingFingerprintNote, setIsAddingFingerprintNote] = useState(false)
   const addPatientFormRef = useRef(null)
   const imageInputRef = useRef(null)
+  // Blood group detection states
+  const [bloodGroupFile, setBloodGroupFile] = useState(null)
+  const [bloodGroupPreview, setBloodGroupPreview] = useState(null)
+  const [isDetectingBloodGroup, setIsDetectingBloodGroup] = useState(false)
+  const [isCapturingFingerprint, setIsCapturingFingerprint] = useState(false)
+  const [bloodGroupResult, setBloodGroupResult] = useState(null)
+  const bloodGroupFileInputRef = useRef(null)
   const [editForm, setEditForm] = useState({
     patientName: '',
     aadharNumber: '',
@@ -716,6 +723,72 @@ const HospitalDashboard = () => {
       toast.error('Failed to add note')
     } finally {
       setIsAddingAccessNote(false)
+    }
+  }
+
+  // Blood group detection handlers
+  const handleBloodGroupFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (file && file.type.startsWith('image/')) {
+      setBloodGroupFile(file)
+      const reader = new FileReader()
+      reader.onload = (e) => setBloodGroupPreview(e.target.result)
+      reader.readAsDataURL(file)
+      setBloodGroupResult(null)
+      toast.success('Image selected successfully!')
+    } else {
+      toast.error('Please select a valid image file')
+    }
+  }
+
+  const handleRemoveBloodGroupFile = () => {
+    setBloodGroupFile(null)
+    setBloodGroupPreview(null)
+    setBloodGroupResult(null)
+    if (bloodGroupFileInputRef.current) {
+      bloodGroupFileInputRef.current.value = ''
+    }
+  }
+
+  const handleDetectBloodGroupFromFile = async () => {
+    if (!bloodGroupFile) {
+      toast.error('Please select an image first')
+      return
+    }
+
+    setIsDetectingBloodGroup(true)
+    try {
+      const response = await predictBloodGroup(bloodGroupFile)
+      if (response.success) {
+        setBloodGroupResult(response.predictions)
+        toast.success('Blood group detected successfully!')
+      } else {
+        toast.error('Failed to detect blood group')
+      }
+    } catch (error) {
+      console.error('Blood group detection error:', error)
+      toast.error(error.message || 'Failed to detect blood group. Please try again.')
+    } finally {
+      setIsDetectingBloodGroup(false)
+    }
+  }
+
+  const handleCaptureAndDetectBloodGroup = async () => {
+    setIsCapturingFingerprint(true)
+    try {
+      toast.loading('Please place your finger on the scanner...', { id: 'capture-bg' })
+      const response = await captureAndPredict()
+      if (response.success) {
+        setBloodGroupResult(response.predictions)
+        toast.success('Fingerprint captured and blood group detected successfully!', { id: 'capture-bg' })
+      } else {
+        toast.error('Failed to detect blood group', { id: 'capture-bg' })
+      }
+    } catch (error) {
+      console.error('Capture and detect error:', error)
+      toast.error(error.message || 'Failed to capture fingerprint. Please try again.', { id: 'capture-bg' })
+    } finally {
+      setIsCapturingFingerprint(false)
     }
   }
 
@@ -2213,6 +2286,165 @@ const HospitalDashboard = () => {
               </>
             )}
           </button>
+        </div>
+
+        {/* Blood Group Detection Section */}
+        <div className="mt-8 pt-8 border-t border-gray-200">
+          <div className="flex items-center space-x-2 mb-4">
+            <Activity className="w-6 h-6 text-red-600" />
+            <h3 className="text-lg font-semibold text-gray-800">Blood Group Detection</h3>
+          </div>
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+            <p className="text-sm text-yellow-800">
+              <strong>Instructions:</strong> Upload a fingerprint image or scan directly from the R307s sensor to detect blood group using AI.
+            </p>
+          </div>
+
+          {/* Image Upload Section */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Upload Fingerprint Image
+            </label>
+            <div className="relative">
+              {!bloodGroupPreview ? (
+                <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-blue-400 transition-colors">
+                  <input
+                    ref={bloodGroupFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleBloodGroupFileSelect}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <Upload className="w-12 h-12 text-gray-400 mx-auto mb-2" />
+                  <p className="text-sm text-gray-600">Click to upload or drag and drop</p>
+                  <p className="text-xs text-gray-500 mt-1">JPG, PNG, WEBP (Max 10MB)</p>
+                </div>
+              ) : (
+                <div className="relative border-2 border-green-300 rounded-lg p-4 bg-green-50">
+                  <img
+                    src={bloodGroupPreview}
+                    alt="Fingerprint preview"
+                    className="w-full h-48 object-contain rounded-lg mb-3"
+                  />
+                  <button
+                    onClick={handleRemoveBloodGroupFile}
+                    className="absolute top-2 right-2 w-8 h-8 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={handleDetectBloodGroupFromFile}
+                    disabled={isDetectingBloodGroup || isCapturingFingerprint}
+                    className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-2 px-4 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                  >
+                    {isDetectingBloodGroup ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Detecting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <ImageIcon className="w-4 h-4" />
+                        <span>Detect Blood Group from Image</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Scanner Section */}
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Or Scan from R307s Sensor
+            </label>
+            <button
+              onClick={handleCaptureAndDetectBloodGroup}
+              disabled={isCapturingFingerprint || isDetectingBloodGroup}
+              className="w-full bg-gradient-to-r from-green-500 to-emerald-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+            >
+              {isCapturingFingerprint ? (
+                <>
+                  <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Capturing...</span>
+                </>
+              ) : (
+                <>
+                  <Fingerprint className="w-5 h-5" />
+                  <span>Capture & Detect from Scanner</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* Results Display */}
+          {bloodGroupResult && (
+            <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-6">
+              <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center space-x-2">
+                <Activity className="w-5 h-5 text-blue-600" />
+                <span>Detection Results</span>
+              </h4>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="bg-white rounded-lg p-4 shadow-md">
+                  <p className="text-sm text-gray-600 mb-1">VGG16 Model</p>
+                  <p className="text-3xl font-bold text-blue-600">{bloodGroupResult.vgg16?.blood_group || 'N/A'}</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Confidence: {bloodGroupResult.vgg16?.confidence || 0}%
+                  </p>
+                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                    <div
+                      className="bg-blue-500 h-2 rounded-full transition-all duration-1000"
+                      style={{ width: `${bloodGroupResult.vgg16?.confidence || 0}%` }}
+                    ></div>
+                  </div>
+                </div>
+                <div className="bg-white rounded-lg p-4 shadow-md">
+                  <p className="text-sm text-gray-600 mb-1">MobileNetV2 Model</p>
+                  <p className="text-3xl font-bold text-green-600">{bloodGroupResult.mobilenetv2?.blood_group || 'N/A'}</p>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Confidence: {bloodGroupResult.mobilenetv2?.confidence || 0}%
+                  </p>
+                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                    <div
+                      className="bg-green-500 h-2 rounded-full transition-all duration-1000"
+                      style={{ width: `${bloodGroupResult.mobilenetv2?.confidence || 0}%` }}
+                    ></div>
+                  </div>
+                </div>
+              </div>
+              <div className={`rounded-lg p-4 ${
+                bloodGroupResult.agreement?.includes('agree') 
+                  ? 'bg-green-100 border border-green-300' 
+                  : 'bg-yellow-100 border border-yellow-300'
+              }`}>
+                <p className="text-sm font-medium text-gray-800 mb-1">Agreement Status</p>
+                <p className="text-sm text-gray-700">{bloodGroupResult.agreement || 'N/A'}</p>
+                <p className="text-lg font-bold text-gray-800 mt-2">
+                  Final Prediction: <span className="text-blue-600">{bloodGroupResult.final_prediction || 'N/A'}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setBloodGroupResult(null)
+                  setBloodGroupFile(null)
+                  setBloodGroupPreview(null)
+                  if (bloodGroupFileInputRef.current) {
+                    bloodGroupFileInputRef.current.value = ''
+                  }
+                }}
+                className="mt-4 w-full px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg bg-white"
+              >
+                Clear Results
+              </button>
+            </div>
+          )}
         </div>
       </div>
     )

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { 
   Heart, 
@@ -6,54 +5,12 @@ import {
   Target, 
   Shield, 
   Zap, 
-  Users, 
-  Award,
-  CheckCircle,
   ArrowRight,
-  Activity,
-  BarChart3,
-  FileText,
-  Camera,
-  Upload
+  Camera
 } from 'lucide-react'
-import { predictBloodGroup } from '../../utils/api'
-import toast from 'react-hot-toast'
+import { Link } from 'react-router-dom'
 
 const LandingPage = () => {
-  const [selectedFile, setSelectedFile] = useState(null)
-  const [preview, setPreview] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState(null)
-
-  const handleFileSelect = (e) => {
-    const file = e.target.files[0]
-    if (file) {
-      setSelectedFile(file)
-      const reader = new FileReader()
-      reader.onload = (e) => setPreview(e.target.result)
-      reader.readAsDataURL(file)
-      setResult(null)
-    }
-  }
-
-  const handlePredict = async () => {
-    if (!selectedFile) {
-      toast.error('Please select a fingerprint image')
-      return
-    }
-
-    setLoading(true)
-    try {
-      const response = await predictBloodGroup(selectedFile)
-      setResult(response)
-      toast.success('Blood group predicted successfully!')
-    } catch (error) {
-      console.error('Prediction error:', error)
-      toast.error(error.message || 'Failed to predict blood group')
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const features = [
     {
@@ -134,111 +91,6 @@ const LandingPage = () => {
               Revolutionary blood group detection using fingerprint analysis and artificial intelligence. 
               Get instant, accurate results in seconds.
             </p>
-          </motion.div>
-
-          {/* Fingerprint Upload Section */}
-          <motion.div
-            initial={{ opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.8, delay: 0.2 }}
-            className="max-w-2xl mx-auto bg-white rounded-2xl shadow-xl p-8 mb-16"
-          >
-            <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
-              Upload Your Fingerprint
-            </h2>
-            
-            <div className="space-y-6">
-              {/* File Upload */}
-              <div className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-blue-400 transition-colors">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                  id="fingerprint-upload"
-                />
-                <label
-                  htmlFor="fingerprint-upload"
-                  className="cursor-pointer flex flex-col items-center space-y-4"
-                >
-                  {preview ? (
-                    <div className="relative">
-                      <img
-                        src={preview}
-                        alt="Fingerprint preview"
-                        className="w-32 h-32 object-cover rounded-lg shadow-lg"
-                      />
-                      <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity">
-                        <Upload className="w-8 h-8 text-white" />
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                        <Camera className="w-8 h-8 text-blue-600" />
-                      </div>
-                      <div>
-                        <p className="text-lg font-medium text-gray-700">Click to upload fingerprint</p>
-                        <p className="text-sm text-gray-500">PNG, JPG, JPEG up to 10MB</p>
-                      </div>
-                    </>
-                  )}
-                </label>
-              </div>
-
-              {/* Predict Button */}
-              <motion.button
-                whileHover={{ scale: 1.02 }}
-                whileTap={{ scale: 0.98 }}
-                onClick={handlePredict}
-                disabled={!selectedFile || loading}
-                className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-4 px-6 rounded-xl font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-              >
-                {loading ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>Analyzing...</span>
-                  </>
-                ) : (
-                  <>
-                    <Brain className="w-5 h-5" />
-                    <span>Predict Blood Group</span>
-                  </>
-                )}
-              </motion.button>
-
-              {/* Results */}
-              {result && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="bg-green-50 border border-green-200 rounded-xl p-6"
-                >
-                  <div className="flex items-center space-x-3 mb-4">
-                    <CheckCircle className="w-6 h-6 text-green-600" />
-                    <h3 className="text-lg font-semibold text-green-800">Prediction Results</h3>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Blood Group:</span>
-                      <span className="font-semibold text-gray-800">{result.predicted_blood_group}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Confidence:</span>
-                      <span className="font-semibold text-gray-800">
-                        {(result.confidence * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Model Agreement:</span>
-                      <span className="font-semibold text-gray-800">
-                        {result.model_agreement ? 'Yes' : 'No'}
-                      </span>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </div>
           </motion.div>
 
           {/* Stats */}
@@ -373,16 +225,17 @@ const LandingPage = () => {
             <p className="text-xl text-blue-100 mb-8 max-w-2xl mx-auto">
               Join thousands of users who have already discovered their blood group using our revolutionary AI technology
             </p>
-            <motion.button
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => document.getElementById('fingerprint-upload')?.click()}
-              className="bg-white text-blue-600 px-8 py-4 rounded-xl font-semibold text-lg shadow-xl hover:shadow-2xl transition-all duration-300 inline-flex items-center space-x-2"
-            >
-              <Heart className="w-5 h-5" />
-              <span>Try It Now</span>
-              <ArrowRight className="w-5 h-5" />
-            </motion.button>
+            <Link to="/upload">
+              <motion.button
+                whileHover={{ scale: 1.05, y: -2 }}
+                whileTap={{ scale: 0.95 }}
+                className="bg-white text-blue-600 px-8 py-4 rounded-xl font-semibold text-lg shadow-xl hover:shadow-2xl transition-all duration-300 inline-flex items-center space-x-2"
+              >
+                <Heart className="w-5 h-5" />
+                <span>Try It Now</span>
+                <ArrowRight className="w-5 h-5" />
+              </motion.button>
+            </Link>
           </motion.div>
         </div>
       </section>

@@ -16,6 +16,7 @@ import { useAuth } from '../../hooks/useAuth'
 import Sidebar from '../../components/Sidebar'
 import Table from '../../components/Table'
 import Modal from '../../components/Modal'
+import FormInput from '../../components/FormInput'
 import toast from 'react-hot-toast'
 import { collection, getDocs, doc, updateDoc, setDoc, deleteDoc, query, orderBy } from 'firebase/firestore'
 import { db } from '../../firebase/config'
@@ -33,38 +34,24 @@ const AdminDashboard = () => {
   const [showModal, setShowModal] = useState(false)
   const [modalType, setModalType] = useState('')
   const [rejectionReason, setRejectionReason] = useState('')
+  const [registerForm, setRegisterForm] = useState({
+    name: '',
+    type: '',
+    hospitalRegistrationNumber: '',
+    location: '',
+    websiteUrl: '',
+    email: '',
+    phoneNumber: '',
+    alternativePhoneNumber: ''
+  })
+  const [registerErrors, setRegisterErrors] = useState({})
+  const [isRegistering, setIsRegistering] = useState(false)
   
   const { userData, createLog } = useAuth()
 
   useEffect(() => {
     fetchData()
   }, [])
-
-  // Generate secure password for hospital
-  const generateSecurePassword = () => {
-    const length = 12
-    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
-    let password = ""
-    
-    // Ensure at least one character from each category
-    const lowercase = "abcdefghijklmnopqrstuvwxyz"
-    const uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    const numbers = "0123456789"
-    const symbols = "!@#$%^&*"
-    
-    password += lowercase[Math.floor(Math.random() * lowercase.length)]
-    password += uppercase[Math.floor(Math.random() * uppercase.length)]
-    password += numbers[Math.floor(Math.random() * numbers.length)]
-    password += symbols[Math.floor(Math.random() * symbols.length)]
-    
-    // Fill the rest randomly
-    for (let i = 4; i < length; i++) {
-      password += charset[Math.floor(Math.random() * charset.length)]
-    }
-    
-    // Shuffle the password
-    return password.split('').sort(() => Math.random() - 0.5).join('')
-  }
 
   const fetchData = async () => {
     setLoading(true)
@@ -327,6 +314,173 @@ BioPrint AI Team
     setSelectedHospital(null)
   }
 
+  const validateRegisterForm = () => {
+    const newErrors = {}
+    
+    if (!registerForm.name.trim()) {
+      newErrors.name = 'Hospital name is required'
+    }
+    
+    if (!registerForm.type) {
+      newErrors.type = 'Hospital type is required'
+    }
+    
+    if (!registerForm.hospitalRegistrationNumber.trim()) {
+      newErrors.hospitalRegistrationNumber = 'Registration number is required'
+    }
+    
+    if (!registerForm.location.trim()) {
+      newErrors.location = 'Location is required'
+    }
+    
+    if (!registerForm.email.trim()) {
+      newErrors.email = 'Email is required'
+    } else if (!/\S+@\S+\.\S+/.test(registerForm.email)) {
+      newErrors.email = 'Email is invalid'
+    }
+    
+    if (!registerForm.phoneNumber.trim()) {
+      newErrors.phoneNumber = 'Phone number is required'
+    } else if (!/^\d{10}$/.test(registerForm.phoneNumber.replace(/\D/g, ''))) {
+      newErrors.phoneNumber = 'Phone number must be 10 digits'
+    }
+    
+    if (registerForm.websiteUrl && !/^https?:\/\/.+/.test(registerForm.websiteUrl)) {
+      newErrors.websiteUrl = 'Website URL must start with http:// or https://'
+    }
+    
+    setRegisterErrors(newErrors)
+    return Object.keys(newErrors).length === 0
+  }
+
+  const handleRegisterHospital = async (e) => {
+    e.preventDefault()
+    
+    if (!validateRegisterForm()) return
+    
+    setIsRegistering(true)
+    try {
+      // Generate secure password
+      const generatedPassword = generateSecurePassword()
+      
+      // Generate unique hospital ID
+      const hospitalId = `HOSP_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+      
+      // Prepare hospital data
+      const hospitalData = {
+        hospitalId,
+        name: registerForm.name.trim(),
+        type: registerForm.type,
+        hospitalRegistrationNumber: registerForm.hospitalRegistrationNumber.trim(),
+        verification_status: 'Verified', // Auto-verified since admin is registering
+        location: registerForm.location.trim(),
+        websiteUrl: registerForm.websiteUrl.trim() || null,
+        allowedHospitals: [],
+        isDisabled: false, // Enabled immediately
+        email: registerForm.email.trim(),
+        phoneNumber: registerForm.phoneNumber.trim(),
+        alternativePhoneNumber: registerForm.alternativePhoneNumber.trim() || null,
+        createdAt: new Date().toISOString()
+      }
+      
+      try {
+        // Create Firebase Authentication account
+        const userCredential = await createUserWithEmailAndPassword(
+          auth,
+          registerForm.email.trim(),
+          generatedPassword
+        )
+        
+        // Create document with Firebase UID as document ID
+        await setDoc(doc(db, 'hospital', userCredential.user.uid), {
+          ...hospitalData,
+          firebaseUid: userCredential.user.uid,
+          generatedPassword: generatedPassword,
+          passwordGeneratedAt: new Date().toISOString()
+        })
+        
+        // Send credentials email
+        await axios.post(`${import.meta.env.VITE_API_BASE_URL}/send-email`, {
+          to: registerForm.email.trim(),
+          subject: 'Hospital Registration - BioPrint AI - Welcome!',
+          body: `
+Dear ${registerForm.name.trim()} Team,
+
+Welcome to BioPrint AI! Your hospital has been successfully registered by the system administrator.
+
+Hospital Details:
+- Hospital Name: ${registerForm.name.trim()}
+- Type: ${registerForm.type}
+- Registration Number: ${registerForm.hospitalRegistrationNumber.trim()}
+- Location: ${registerForm.location.trim()}
+- Email: ${registerForm.email.trim()}
+
+Your hospital account is now active and verified. You can access the BioPrint AI system immediately.
+
+Login Credentials:
+- Email: ${registerForm.email.trim()}
+- Password: ${generatedPassword}
+
+IMPORTANT SECURITY NOTES:
+- Please change your password after first login
+- Keep your login credentials secure
+- Do not share your password with unauthorized personnel
+
+Next Steps:
+1. Log in to the hospital dashboard using the credentials above
+2. Change your password immediately after first login
+3. Start adding patient records
+4. Access the fingerprint blood group prediction system
+
+Login URL: ${window.location.origin}/hospital-login
+
+If you have any questions or need assistance, please contact our support team.
+
+Best regards,
+BioPrint AI Team
+          `
+        })
+        
+        // Create log entry
+        await createLog({
+          hospitalId: userCredential.user.uid,
+          action: 'ADMIN_REGISTER_HOSPITAL',
+          remarks: `Admin registered and verified hospital: ${registerForm.name.trim()} - Firebase account created and enabled`
+        })
+        
+        toast.success('Hospital registered, verified, and credentials sent successfully!')
+        
+        // Reset form
+        setRegisterForm({
+          name: '',
+          type: '',
+          hospitalRegistrationNumber: '',
+          location: '',
+          websiteUrl: '',
+          email: '',
+          phoneNumber: '',
+          alternativePhoneNumber: ''
+        })
+        setRegisterErrors({})
+        
+        // Refresh data
+        await fetchData()
+        
+        // Switch to hospitals tab to see the new hospital
+        setActiveTab('hospitals')
+        
+      } catch (firebaseError) {
+        console.error('Firebase account creation failed:', firebaseError)
+        toast.error('Failed to create hospital account. Please try again.')
+      }
+    } catch (error) {
+      console.error('Registration error:', error)
+      toast.error('Failed to register hospital. Please try again.')
+    } finally {
+      setIsRegistering(false)
+    }
+  }
+
   const getStatusBadge = (status) => {
     const statusConfig = {
       'Pending': { color: 'bg-yellow-100 text-yellow-800', icon: AlertCircle },
@@ -515,6 +669,179 @@ BioPrint AI Team
     </div>
   )
 
+  const renderRegisterHospital = () => {
+    const hospitalTypes = [
+      'Government',
+      'Private',
+      'Clinic',
+      'Trust',
+      'NGO',
+      'Other'
+    ]
+
+    return (
+      <div className="bg-white rounded-xl p-6 shadow-lg">
+        <div className="mb-6">
+          <h3 className="text-2xl font-bold text-gray-800 mb-2">Register New Hospital</h3>
+          <p className="text-gray-600">Register a new hospital. The hospital will be automatically verified and credentials will be sent via email.</p>
+        </div>
+
+        <form onSubmit={handleRegisterHospital} className="space-y-6">
+          {/* Basic Information */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormInput
+              label="Hospital Name"
+              name="name"
+              value={registerForm.name}
+              onChange={(e) => {
+                setRegisterForm({...registerForm, name: e.target.value})
+                if (registerErrors.name) setRegisterErrors({...registerErrors, name: ''})
+              }}
+              placeholder="Enter hospital name"
+              error={registerErrors.name}
+              required
+            />
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Hospital Type <span className="text-red-500">*</span>
+              </label>
+              <select
+                name="type"
+                value={registerForm.type}
+                onChange={(e) => {
+                  setRegisterForm({...registerForm, type: e.target.value})
+                  if (registerErrors.type) setRegisterErrors({...registerErrors, type: ''})
+                }}
+                className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200 ${
+                  registerErrors.type
+                    ? 'border-red-300 bg-red-50'
+                    : 'border-gray-300 hover:border-gray-400'
+                } bg-white`}
+              >
+                <option value="">Select hospital type</option>
+                {hospitalTypes.map((type) => (
+                  <option key={type} value={type}>{type}</option>
+                ))}
+              </select>
+              {registerErrors.type && (
+                <p className="text-sm text-red-600">{registerErrors.type}</p>
+              )}
+            </div>
+          </div>
+
+          <FormInput
+            label="Hospital Registration Number"
+            name="hospitalRegistrationNumber"
+            value={registerForm.hospitalRegistrationNumber}
+            onChange={(e) => {
+              setRegisterForm({...registerForm, hospitalRegistrationNumber: e.target.value})
+              if (registerErrors.hospitalRegistrationNumber) setRegisterErrors({...registerErrors, hospitalRegistrationNumber: ''})
+            }}
+            placeholder="Enter registration number"
+            error={registerErrors.hospitalRegistrationNumber}
+            required
+          />
+
+          <FormInput
+            label="Location"
+            name="location"
+            value={registerForm.location}
+            onChange={(e) => {
+              setRegisterForm({...registerForm, location: e.target.value})
+              if (registerErrors.location) setRegisterErrors({...registerErrors, location: ''})
+            }}
+            placeholder="Enter hospital address"
+            error={registerErrors.location}
+            required
+          />
+
+          {/* Contact Information */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormInput
+              label="Email Address"
+              type="email"
+              name="email"
+              value={registerForm.email}
+              onChange={(e) => {
+                setRegisterForm({...registerForm, email: e.target.value})
+                if (registerErrors.email) setRegisterErrors({...registerErrors, email: ''})
+              }}
+              placeholder="hospital@example.com"
+              error={registerErrors.email}
+              required
+            />
+
+            <FormInput
+              label="Phone Number"
+              name="phoneNumber"
+              value={registerForm.phoneNumber}
+              onChange={(e) => {
+                setRegisterForm({...registerForm, phoneNumber: e.target.value.replace(/\D/g, '').slice(0, 10)})
+                if (registerErrors.phoneNumber) setRegisterErrors({...registerErrors, phoneNumber: ''})
+              }}
+              placeholder="Enter 10-digit phone number"
+              error={registerErrors.phoneNumber}
+              required
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <FormInput
+              label="Alternative Phone Number"
+              name="alternativePhoneNumber"
+              value={registerForm.alternativePhoneNumber}
+              onChange={(e) => {
+                setRegisterForm({...registerForm, alternativePhoneNumber: e.target.value.replace(/\D/g, '').slice(0, 10)})
+              }}
+              placeholder="Enter alternative phone number"
+            />
+
+            <FormInput
+              label="Website URL"
+              name="websiteUrl"
+              value={registerForm.websiteUrl}
+              onChange={(e) => {
+                setRegisterForm({...registerForm, websiteUrl: e.target.value})
+                if (registerErrors.websiteUrl) setRegisterErrors({...registerErrors, websiteUrl: ''})
+              }}
+              placeholder="https://hospital-website.com"
+              error={registerErrors.websiteUrl}
+            />
+          </div>
+
+          {/* Submit Button */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+            <p className="text-sm text-blue-800">
+              <strong>Note:</strong> The hospital will be automatically verified and login credentials will be sent to the provided email address.
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            disabled={isRegistering}
+            className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+          >
+            {isRegistering ? (
+              <>
+                <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Registering...</span>
+              </>
+            ) : (
+              <>
+                <Building2 className="w-5 h-5" />
+                <span>Register & Verify Hospital</span>
+              </>
+            )}
+          </button>
+        </form>
+      </div>
+    )
+  }
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
@@ -528,6 +855,8 @@ BioPrint AI Team
             emptyMessage="No hospitals found"
           />
         )
+      case 'register':
+        return renderRegisterHospital()
       case 'logs':
         return (
           <Table
