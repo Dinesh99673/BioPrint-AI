@@ -13,7 +13,8 @@ import {
   ArrowLeft,
   Building2,
   Stethoscope,
-  Clock
+  Clock,
+  Home
 } from 'lucide-react'
 import { collection, query, where, getDocs } from 'firebase/firestore'
 import { db } from '../../firebase/config'
@@ -116,18 +117,9 @@ const PatientDashboard = () => {
 
   // Get associated hospitals info
   const getAssociatedHospitals = () => {
-    if (!patientData?.hospitalRecords) return []
+    if (!patientData?.associatedHospitals) return []
     
-    const hospitals = []
-    Object.entries(patientData.hospitalRecords).forEach(([hospitalId, record]) => {
-      hospitals.push({
-        hospitalId,
-        hospitalName: record?.hospitalName || 'Unknown Hospital',
-        linkedAt: record?.linkedAt || 'N/A',
-        lastAccessed: record?.lastAccessed || 'N/A',
-        notesCount: record?.notes?.length || 0
-      })
-    })
+    const hospitals = patientData.associatedHospitals
     
     return hospitals
   }
@@ -280,6 +272,17 @@ const PatientDashboard = () => {
                     </p>
                   </div>
                 </div>
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
+                    <Home className="w-5 h-5 text-gray-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-gray-500">Address</p>
+                    <p className="font-semibold text-gray-800">
+                      {patientData.address}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </motion.div>
@@ -346,7 +349,7 @@ const PatientDashboard = () => {
               <div className="space-y-4">
                 {associatedHospitals.map((hospital, index) => (
                   <motion.div
-                    key={hospital.hospitalId}
+                    key={index}
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.9 + index * 0.1 }}
@@ -354,24 +357,7 @@ const PatientDashboard = () => {
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
-                        <h3 className="font-semibold text-gray-800 mb-2">{hospital.hospitalName}</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-600">
-                          <div>
-                            <span className="font-medium">Linked:</span>{' '}
-                            {hospital.linkedAt !== 'N/A' 
-                              ? new Date(hospital.linkedAt).toLocaleDateString() 
-                              : 'N/A'}
-                          </div>
-                          <div>
-                            <span className="font-medium">Last Accessed:</span>{' '}
-                            {hospital.lastAccessed !== 'N/A' 
-                              ? new Date(hospital.lastAccessed).toLocaleDateString() 
-                              : 'N/A'}
-                          </div>
-                          <div>
-                            <span className="font-medium">Notes:</span> {hospital.notesCount}
-                          </div>
-                        </div>
+                        <h3 className="font-semibold text-gray-800 mb-2">{hospital}</h3>
                       </div>
                     </div>
                   </motion.div>

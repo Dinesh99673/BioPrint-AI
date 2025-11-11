@@ -30,6 +30,7 @@ const Sidebar = ({ activeTab, setActiveTab, userType }) => {
     { id: 'manage-patients', label: 'Manage Patients', icon: Users },
     { id: 'access-patient', label: 'Access Patient', icon: Shield },
     { id: 'search-fingerprint', label: 'Search by Fingerprint', icon: Activity },
+    { id: 'search-blood-group', label: 'Search by Blood Group', icon: Heart },
     { id: 'profile', label: 'Profile', icon: Settings }
   ]
 

@@ -27,7 +27,6 @@ import FormInput from '../../components/FormInput'
 import toast from 'react-hot-toast'
 import { collection, getDocs, doc, setDoc, updateDoc, query, where, orderBy, arrayUnion } from 'firebase/firestore'
 import { db } from '../../firebase/config'
-import axios from 'axios'
 import { updatePassword } from 'firebase/auth'
 import { auth } from '../../firebase/config'
 import { cleanupGeneratedPassword, isUsingGeneratedPassword, validatePassword } from '../../utils/hospitalAuth'
@@ -88,12 +87,17 @@ const HospitalDashboard = () => {
   const [isCapturingFingerprint, setIsCapturingFingerprint] = useState(false)
   const [bloodGroupResult, setBloodGroupResult] = useState(null)
   const bloodGroupFileInputRef = useRef(null)
+  // Blood group search states
+  const [bloodGroupSearch, setBloodGroupSearch] = useState({ bloodGroup: '', area: '' })
+  const [bloodGroupSearchResults, setBloodGroupSearchResults] = useState([])
+  const [isSearchingByBloodGroup, setIsSearchingByBloodGroup] = useState(false)
   const [editForm, setEditForm] = useState({
     patientName: '',
     aadharNumber: '',
     email: '',
     mobileNumber: '',
     relativesNumber: '',
+    address: '',
     bloodGroup: '',
     anyAllergy: '',
     anyDisease: '',
@@ -109,6 +113,12 @@ const HospitalDashboard = () => {
   }, [])
 
   const fetchPatients = async () => {
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. Please contact administrator.')
+      setLoading(false)
+      return
+    }
+    
     setLoading(true)
     try {
       const patientsQuery = query(
@@ -131,6 +141,11 @@ const HospitalDashboard = () => {
   }
 
   const handleAddPatient = async (patientData, formElement) => {
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. You cannot add new patients. Please contact administrator.')
+      return
+    }
+    
     setIsAddingPatient(true)
     try {
       const patientId = Date.now().toString()
@@ -195,6 +210,11 @@ const HospitalDashboard = () => {
   }
 
   const handleSearchAadharForAdd = async () => {
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. You cannot add new patients. Please contact administrator.')
+      return
+    }
+    
     if (!addPatientAadhar || addPatientAadhar.trim().length !== 12) {
       toast.error('Please enter a valid 12-digit Aadhaar number')
       return
@@ -478,6 +498,7 @@ const HospitalDashboard = () => {
         email: editForm.email,
         mobileNumber: editForm.mobileNumber,
         relativesNumber: editForm.relativesNumber,
+        address: editForm.address,
         bloodGroup: editForm.bloodGroup,
         anyAllergy: editForm.anyAllergy,
         anyDisease: editForm.anyDisease,
@@ -511,6 +532,11 @@ const HospitalDashboard = () => {
   }
 
   const handleAccessPatient = async (formData) => {
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. You cannot access patient details. Please contact administrator.')
+      return
+    }
+    
     setIsSendingAccessOtp(true)
     try {
       // First, search for patient by Aadhaar number
@@ -664,6 +690,71 @@ const HospitalDashboard = () => {
     }
   }
 
+  const handleSearchByBloodGroup = async () => {
+    if (!bloodGroupSearch.bloodGroup.trim()) {
+      toast.error('Please enter a blood group')
+      return
+    }
+
+    setIsSearchingByBloodGroup(true)
+    try {
+      // Query patients with matching blood group and privacy permission = 'yes'
+      const patientsQuery = query(
+        collection(db, 'patient'),
+        where('bloodGroup', '==', bloodGroupSearch.bloodGroup.trim()),
+        where('patientPrivacyPermission', '==', 'yes')
+      )
+      const patientsSnapshot = await getDocs(patientsQuery)
+      
+      let results = patientsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }))
+
+      // Filter by area substring if area is provided
+      if (bloodGroupSearch.area.trim()) {
+        const areaLower = bloodGroupSearch.area.trim().toLowerCase()
+        results = results.filter(patient => {
+          // Check multiple fields that might contain area information
+          const location = (patient.location || '').toLowerCase()
+          const address = (patient.address || '').toLowerCase()
+          const area = (patient.area || '').toLowerCase()
+          const city = (patient.city || '').toLowerCase()
+          const state = (patient.state || '').toLowerCase()
+          const pincode = (patient.pincode || '').toLowerCase()
+          
+          // Check if any of these fields contain the area substring
+          return location.includes(areaLower) ||
+                 address.includes(areaLower) ||
+                 area.includes(areaLower) ||
+                 city.includes(areaLower) ||
+                 state.includes(areaLower) ||
+                 pincode.includes(areaLower)
+        })
+      }
+
+      setBloodGroupSearchResults(results)
+      
+      if (results.length === 0) {
+        toast.success('No patients found matching the criteria')
+      } else {
+        toast.success(`Found ${results.length} patient(s)`)
+        
+        // Create log entry
+        await createLog({
+          hospitalId: userData.hospitalId,
+          action: 'SEARCH_BY_BLOOD_GROUP',
+          remarks: `Searched for blood group: ${bloodGroupSearch.bloodGroup}, area: ${bloodGroupSearch.area || 'all'}, found ${results.length} result(s)`
+        })
+      }
+    } catch (error) {
+      console.error('Error searching by blood group:', error)
+      toast.error('Failed to search patients')
+    } finally {
+      setIsSearchingByBloodGroup(false)
+    }
+  }
+
   const handleAddAccessNote = async () => {
     if (!accessPatientNote.trim() || !accessPatientData) {
       toast.error('Please enter a note')
@@ -813,6 +904,11 @@ const HospitalDashboard = () => {
   }
 
   const handleSearchFingerprint = async () => {
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. You cannot search patients by fingerprint. Please contact administrator.')
+      return
+    }
+    
     setIsSearchingFingerprint(true)
     try {
       toast.loading('Please place your finger on the scanner...', { id: 'search' })
@@ -1259,6 +1355,7 @@ const HospitalDashboard = () => {
                 email: row.email || '',
                 mobileNumber: row.mobileNumber || '',
                 relativesNumber: row.relativesNumber || '',
+                address: row.address || '',
                 bloodGroup: row.bloodGroup || '',
                 anyAllergy: row.anyAllergy || '',
                 anyDisease: row.anyDisease || '',
@@ -1366,6 +1463,27 @@ const HospitalDashboard = () => {
   )
 
   const renderAddPatient = () => {
+    // Show disabled message if hospital is disabled
+    if (userData?.isDisabled) {
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <h3 className="text-lg font-semibold text-gray-800 mb-6">Add New Patient</h3>
+          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-lg font-semibold text-red-800 mb-2">Account Disabled</h4>
+                <p className="text-sm text-red-700 leading-relaxed">
+                  Your hospital account has been disabled. You cannot add new patients at this time. 
+                  Please contact the administrator to restore access to your account.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    
     // Step 1: Aadhaar Search (if patient not found and registration form not shown)
     if (!showRegistrationForm && !foundPatientForAdd) {
       return (
@@ -1396,7 +1514,7 @@ const HospitalDashboard = () => {
             <button
               type="button"
               onClick={handleSearchAadharForAdd}
-              disabled={isSearchingAadhar || addPatientAadhar.length !== 12}
+              disabled={isSearchingAadhar || addPatientAadhar.length !== 12 || userData?.isDisabled}
               className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
             >
               {isSearchingAadhar ? (
@@ -1469,6 +1587,10 @@ const HospitalDashboard = () => {
                   <p className="text-gray-900 font-medium">{foundPatientForAdd.relativesNumber}</p>
                 </div>
               )}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <p className="text-gray-900">{foundPatientForAdd.address || 'N/A'}</p>
+              </div>
             </div>
           </div>
 
@@ -1575,6 +1697,7 @@ const HospitalDashboard = () => {
               email: formData.get('email'),
               mobileNumber: formData.get('mobileNumber'),
               relativesNumber: formData.get('relativesNumber'),
+              address: formData.get('address'),
               bloodGroup: formData.get('bloodGroup'),
               anyAllergy: formData.get('anyAllergy'),
               anyDisease: formData.get('anyDisease'),
@@ -1624,6 +1747,14 @@ const HospitalDashboard = () => {
             label="Blood Group"
             name="bloodGroup"
             placeholder="e.g., A+, B-, O+, AB-"
+            required
+          />
+        </div>
+        <div>
+          <FormInput
+            label="Patient Address"
+            name="address"
+            placeholder="Enter patient's full address"
             required
           />
         </div>
@@ -1787,6 +1918,27 @@ const HospitalDashboard = () => {
   )
   }
   const renderAccessPatient = () => {
+    // Show disabled message if hospital is disabled
+    if (userData?.isDisabled) {
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <h3 className="text-lg font-semibold text-gray-800 mb-6">Access Patient Data</h3>
+          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-lg font-semibold text-red-800 mb-2">Account Disabled</h4>
+                <p className="text-sm text-red-700 leading-relaxed">
+                  Your hospital account has been disabled. You cannot access patient details at this time. 
+                  Please contact the administrator to restore access to your account.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    
     // Show patient data if accessed (and not pending OTP)
     if (accessPatientData && !accessPatientData._pendingOtp) {
       const hospitalId = userData.hospitalId
@@ -1833,6 +1985,10 @@ const HospitalDashboard = () => {
                 <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
                   {accessPatientData.bloodGroup || 'N/A'}
                 </span>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <p className="text-gray-900">{accessPatientData.address || 'N/A'}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Any Allergy</label>
@@ -1947,7 +2103,7 @@ const HospitalDashboard = () => {
             />
             <button
               type="submit"
-              disabled={isSendingAccessOtp}
+              disabled={isSendingAccessOtp || userData?.isDisabled}
               className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
             >
               {isSendingAccessOtp ? (
@@ -2041,6 +2197,30 @@ const HospitalDashboard = () => {
   }
 
   const renderSearchFingerprint = () => {
+    // Show disabled message if hospital is disabled
+    if (userData?.isDisabled) {
+      return (
+        <div className="bg-white rounded-xl p-6 shadow-lg">
+          <div className="flex items-center space-x-2 mb-6">
+            <Fingerprint className="w-6 h-6 text-purple-600" />
+            <h3 className="text-lg font-semibold text-gray-800">Search Patient by Fingerprint</h3>
+          </div>
+          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <h4 className="text-lg font-semibold text-red-800 mb-2">Account Disabled</h4>
+                <p className="text-sm text-red-700 leading-relaxed">
+                  Your hospital account has been disabled. You cannot search patients by fingerprint at this time. 
+                  Please contact the administrator to restore access to your account.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    
     // Show OTP input if OTP was sent
     if (fingerprintOtpData.email && fingerprintOtpData.patientData) {
       return (
@@ -2172,6 +2352,10 @@ const HospitalDashboard = () => {
                   {foundPatientByFingerprint.bloodGroup || 'N/A'}
                 </span>
               </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <p className="text-gray-900">{foundPatientByFingerprint.address || 'N/A'}</p>
+              </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Any Allergy</label>
                 <p className="text-gray-900">{foundPatientByFingerprint.anyAllergy || 'None'}</p>
@@ -2268,7 +2452,7 @@ const HospitalDashboard = () => {
         <div className="space-y-4">
           <button
             onClick={handleSearchFingerprint}
-            disabled={isSearchingFingerprint}
+            disabled={isSearchingFingerprint || userData?.isDisabled}
             className="w-full bg-gradient-to-r from-purple-500 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
           >
             {isSearchingFingerprint ? (
@@ -2463,6 +2647,139 @@ const HospitalDashboard = () => {
     )
   }
 
+  const renderSearchByBloodGroup = () => (
+    <div className="bg-white rounded-xl p-6 shadow-lg">
+      <div className="flex items-center space-x-2 mb-6">
+        <Activity className="w-6 h-6 text-red-600" />
+        <h3 className="text-lg font-semibold text-gray-800">Search by Blood Group</h3>
+      </div>
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <p className="text-sm text-blue-800">
+          <strong>Instructions:</strong> Enter blood group and optionally an area to search for patients who have given privacy permission. Only patients with <strong>patientPrivacyPermission: "yes"</strong> will be shown in results.
+        </p>
+      </div>
+      
+      <div className="space-y-4 mb-6">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Blood Group
+            <span className="text-red-500 ml-1">*</span>
+          </label>
+          <select
+            value={bloodGroupSearch.bloodGroup}
+            onChange={(e) => setBloodGroupSearch({ ...bloodGroupSearch, bloodGroup: e.target.value })}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="">Select Blood Group</option>
+            <option value="A+">A+</option>
+            <option value="A-">A-</option>
+            <option value="B+">B+</option>
+            <option value="B-">B-</option>
+            <option value="AB+">AB+</option>
+            <option value="AB-">AB-</option>
+            <option value="O+">O+</option>
+            <option value="O-">O-</option>
+          </select>
+        </div>
+        
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Area (Optional)
+          </label>
+          <input
+            type="text"
+            value={bloodGroupSearch.area}
+            onChange={(e) => setBloodGroupSearch({ ...bloodGroupSearch, area: e.target.value })}
+            placeholder="Enter area, city, location, or pincode..."
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          />
+          <p className="text-xs text-gray-500 mt-1">Leave empty to search all areas</p>
+        </div>
+        
+        <button
+          onClick={handleSearchByBloodGroup}
+          disabled={isSearchingByBloodGroup || !bloodGroupSearch.bloodGroup.trim()}
+          className="w-full bg-gradient-to-r from-red-500 to-red-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+        >
+          {isSearchingByBloodGroup ? (
+            <>
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Searching...</span>
+            </>
+          ) : (
+            <>
+              <Search className="w-5 h-5" />
+              <span>Search Patients</span>
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Results Display */}
+      {bloodGroupSearchResults.length > 0 && (
+        <div className="mt-6 border-t border-gray-200 pt-6">
+          <h4 className="text-lg font-semibold text-gray-800 mb-4">
+            Search Results ({bloodGroupSearchResults.length} patient(s) found)
+          </h4>
+          <div className="space-y-4 max-h-96 overflow-y-auto">
+            {bloodGroupSearchResults.map((patient) => (
+              <div key={patient.id} className="bg-gray-50 rounded-lg p-4 border border-gray-200 hover:shadow-md transition-shadow">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Patient Name</label>
+                    <p className="text-gray-900 font-medium">{patient.patientName || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Aadhaar Number</label>
+                    <p className="text-gray-900">{patient.aadharNumber || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Email</label>
+                    <p className="text-gray-900">{patient.email || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Mobile Number</label>
+                    <p className="text-gray-900">{patient.mobileNumber || 'N/A'}</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Blood Group</label>
+                    <span className="inline-block px-2 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
+                      {patient.bloodGroup || 'N/A'}
+                    </span>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Address</label>
+                    <p className="text-gray-900">
+                      {patient.address || patient.location || patient.area || patient.city || 'N/A'}
+                    </p>
+                  </div>
+                </div>
+                {patient.relativesNumber && (
+                  <div className="mt-3 pt-3 border-t border-gray-200">
+                    <label className="block text-xs font-medium text-gray-500 mb-1">Relatives Number</label>
+                    <p className="text-gray-900">{patient.relativesNumber}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <button
+            onClick={() => {
+              setBloodGroupSearchResults([])
+              setBloodGroupSearch({ bloodGroup: '', area: '' })
+            }}
+            className="mt-4 w-full px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors border border-gray-300 rounded-lg bg-white"
+          >
+            Clear Results
+          </button>
+        </div>
+      )}
+    </div>
+  )
+
   const renderManagePatients = () => (
     <div className="space-y-6">
       {/* Search Bar */}
@@ -2503,6 +2820,8 @@ const HospitalDashboard = () => {
         return renderAccessPatient()
       case 'search-fingerprint':
         return renderSearchFingerprint()
+      case 'search-blood-group':
+        return renderSearchByBloodGroup()
       case 'profile':
         return (
           <div className="space-y-6">
@@ -2668,6 +2987,10 @@ const HospitalDashboard = () => {
                 <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium">
                   {selectedPatient?.bloodGroup || 'N/A'}
                 </span>
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                <p className="text-gray-900">{selectedPatient?.address || 'N/A'}</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Any Allergy</label>
@@ -2879,6 +3202,15 @@ const HospitalDashboard = () => {
                   value={editForm.bloodGroup}
                   onChange={(e) => setEditForm({...editForm, bloodGroup: e.target.value})}
                   placeholder="e.g., A+, B-, O+, AB-"
+                  required
+                />
+              </div>
+              <div>
+                <FormInput
+                  label="Patient Address"
+                  value={editForm.address}
+                  onChange={(e) => setEditForm({...editForm, address: e.target.value})}
+                  placeholder="Enter patient's full address"
                   required
                 />
               </div>
