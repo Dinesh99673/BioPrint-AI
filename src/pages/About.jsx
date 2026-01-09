@@ -283,7 +283,7 @@ const About = () => {
         </div>
       </section>
 
-      {/* Developers Section 
+      {/* Developers Section */}
       <section className="py-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <motion.div
@@ -348,7 +348,6 @@ const About = () => {
           </div>
         </div>
       </section>
-      */}
 
       {/* CTA Section */}
       <section className="py-20 bg-gradient-to-r from-blue-600 to-indigo-700">
