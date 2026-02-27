@@ -5,14 +5,11 @@ import {
   ArrowLeft, 
   Download, 
   Share2, 
-  CheckCircle, 
   AlertTriangle,
   Activity,
   Target,
-  BarChart3,
   RefreshCw,
   Heart,
-  Zap,
   AlertCircle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -43,9 +40,7 @@ const Results = () => {
     const reportData = {
       timestamp: new Date().toISOString(),
       vgg16: results.predictions.vgg16,
-      mobilenetv2: results.predictions.mobilenetv2,
-      agreement: results.predictions.agreement,
-      final_prediction: results.predictions.final_prediction
+      prediction: results.predictions.vgg16?.blood_group
     }
     
     const blob = new Blob([JSON.stringify(reportData, null, 2)], { type: 'application/json' })
@@ -66,14 +61,14 @@ const Results = () => {
       try {
         await navigator.share({
           title: 'Blood Group Detection Results',
-          text: `My blood group detected as ${results.predictions.final_prediction} using BioPrint AI`,
+          text: `My blood group detected as ${results.predictions.vgg16?.blood_group ?? results.predictions.final_prediction} using BioPrint AI`,
           url: window.location.href,
         })
       } catch (error) {
         console.log('Error sharing:', error)
       }
     } else {
-      navigator.clipboard.writeText(`My blood group detected as ${results.predictions.final_prediction} using BioPrint AI`)
+      navigator.clipboard.writeText(`My blood group detected as ${results.predictions.vgg16?.blood_group ?? results.predictions.final_prediction} using BioPrint AI`)
       toast.success('Results copied to clipboard!')
     }
   }
@@ -108,7 +103,6 @@ const Results = () => {
   }
 
   const { predictions } = results
-  const isAgreement = predictions.agreement.includes('agree')
 
   return (
     <div className="pt-20 min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50">
@@ -163,7 +157,7 @@ const Results = () => {
               </span>
             </h1>
             <p className="text-xl text-gray-600">
-              AI-powered analysis using dual deep learning models
+              AI-powered analysis using VGG16
             </p>
           </div>
         </motion.div>
@@ -188,14 +182,13 @@ const Results = () => {
           </div>
         </motion.div>
 
-        {/* Main Results */}
+        {/* Main Results - VGG16 only */}
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2 }}
-          className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-12"
+          className="max-w-xl mx-auto mb-12"
         >
-          {/* VGG16 Results */}
           <motion.div
             whileHover={{ y: -5, scale: 1.02 }}
             className="bg-white rounded-2xl p-8 shadow-xl border border-gray-100"
@@ -212,81 +205,19 @@ const Results = () => {
             
             <div className="text-center">
               <div className="text-6xl font-bold text-blue-600 mb-2">
-                {predictions.vgg16.blood_group}
+                {predictions.vgg16?.blood_group ?? 'N/A'}
               </div>
               <div className="text-2xl font-semibold text-gray-700 mb-4">
-                {predictions.vgg16.confidence}% Confidence
+                {predictions.vgg16?.confidence ?? 0}% Confidence
               </div>
               <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
                 <div 
                   className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-1000"
-                  style={{ width: `${predictions.vgg16.confidence}%` }}
+                  style={{ width: `${predictions.vgg16?.confidence ?? 0}%` }}
                 ></div>
               </div>
             </div>
           </motion.div>
-
-          {/* MobileNetV2 Results */}
-          <motion.div
-            whileHover={{ y: -5, scale: 1.02 }}
-            className="bg-white rounded-2xl p-8 shadow-xl border border-gray-100"
-          >
-            <div className="flex items-center space-x-3 mb-6">
-              <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-emerald-500 rounded-xl flex items-center justify-center">
-                <Zap className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h3 className="text-2xl font-bold text-gray-800">MobileNetV2</h3>
-                <p className="text-gray-600">Lightweight CNN</p>
-              </div>
-            </div>
-            
-            <div className="text-center">
-              <div className="text-6xl font-bold text-green-600 mb-2">
-                {predictions.mobilenetv2.blood_group}
-              </div>
-              <div className="text-2xl font-semibold text-gray-700 mb-4">
-                {predictions.mobilenetv2.confidence}% Confidence
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
-                <div 
-                  className="bg-gradient-to-r from-green-500 to-emerald-500 h-3 rounded-full transition-all duration-1000"
-                  style={{ width: `${predictions.mobilenetv2.confidence}%` }}
-                ></div>
-              </div>
-            </div>
-          </motion.div>
-        </motion.div>
-
-        {/* Agreement Status */}
-        <motion.div
-          initial={{ opacity: 0, y: 30 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.8, delay: 0.4 }}
-          className="mb-12"
-        >
-          <div className={`rounded-2xl p-8 text-center ${
-            isAgreement 
-              ? 'bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-200' 
-              : 'bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-200'
-          }`}>
-            <div className="flex items-center justify-center space-x-3 mb-4">
-              {isAgreement ? (
-                <CheckCircle className="w-8 h-8 text-green-600" />
-              ) : (
-                <AlertTriangle className="w-8 h-8 text-yellow-600" />
-              )}
-              <h3 className="text-2xl font-bold text-gray-800">
-                {isAgreement ? 'Models Agree!' : 'Models Disagree'}
-              </h3>
-            </div>
-            <p className="text-lg text-gray-600 mb-4">
-              {predictions.agreement}
-            </p>
-            <div className="text-3xl font-bold text-gray-800">
-              Final Prediction: <span className="text-blue-600">{predictions.final_prediction}</span>
-            </div>
-          </div>
         </motion.div>
 
         {/* Action Buttons */}

@@ -2826,51 +2826,25 @@ const HospitalDashboard = () => {
             </button>
           </div>
 
-          {/* Results Display */}
+          {/* Results Display - VGG16 only */}
           {bloodGroupResult && (
             <div className="mt-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-200 rounded-lg p-6">
               <h4 className="text-lg font-semibold text-gray-800 mb-4 flex items-center space-x-2">
                 <Activity className="w-5 h-5 text-blue-600" />
                 <span>Detection Results</span>
               </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                <div className="bg-white rounded-lg p-4 shadow-md">
-                  <p className="text-sm text-gray-600 mb-1">VGG16 Model</p>
-                  <p className="text-3xl font-bold text-blue-600">{bloodGroupResult.vgg16?.blood_group || 'N/A'}</p>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Confidence: {bloodGroupResult.vgg16?.confidence || 0}%
-                  </p>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                    <div
-                      className="bg-blue-500 h-2 rounded-full transition-all duration-1000"
-                      style={{ width: `${bloodGroupResult.vgg16?.confidence || 0}%` }}
-                    ></div>
-                  </div>
-                </div>
-                <div className="bg-white rounded-lg p-4 shadow-md">
-                  <p className="text-sm text-gray-600 mb-1">MobileNetV2 Model</p>
-                  <p className="text-3xl font-bold text-green-600">{bloodGroupResult.mobilenetv2?.blood_group || 'N/A'}</p>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Confidence: {bloodGroupResult.mobilenetv2?.confidence || 0}%
-                  </p>
-                  <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                    <div
-                      className="bg-green-500 h-2 rounded-full transition-all duration-1000"
-                      style={{ width: `${bloodGroupResult.mobilenetv2?.confidence || 0}%` }}
-                    ></div>
-                  </div>
-                </div>
-              </div>
-              <div className={`rounded-lg p-4 ${
-                bloodGroupResult.agreement?.includes('agree') 
-                  ? 'bg-green-100 border border-green-300' 
-                  : 'bg-yellow-100 border border-yellow-300'
-              }`}>
-                <p className="text-sm font-medium text-gray-800 mb-1">Agreement Status</p>
-                <p className="text-sm text-gray-700">{bloodGroupResult.agreement || 'N/A'}</p>
-                <p className="text-lg font-bold text-gray-800 mt-2">
-                  Final Prediction: <span className="text-blue-600">{bloodGroupResult.final_prediction || 'N/A'}</span>
+              <div className="bg-white rounded-lg p-4 shadow-md mb-4">
+                <p className="text-sm text-gray-600 mb-1">VGG16 Model</p>
+                <p className="text-3xl font-bold text-blue-600">{bloodGroupResult.vgg16?.blood_group || 'N/A'}</p>
+                <p className="text-sm text-gray-600 mt-1">
+                  Confidence: {bloodGroupResult.vgg16?.confidence ?? 0}%
                 </p>
+                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
+                  <div
+                    className="bg-blue-500 h-2 rounded-full transition-all duration-1000"
+                    style={{ width: `${bloodGroupResult.vgg16?.confidence ?? 0}%` }}
+                  ></div>
+                </div>
               </div>
               <button
                 onClick={() => {
