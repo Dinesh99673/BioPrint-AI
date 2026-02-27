@@ -10,7 +10,8 @@ import {
   Shield,
   Activity,
   AlertTriangle,
-  Heart
+  Heart,
+  Stethoscope
 } from 'lucide-react'
 import { useAuth } from '../hooks/useAuth'
 
@@ -28,6 +29,7 @@ const Sidebar = ({ activeTab, setActiveTab, userType }) => {
     { id: 'overview', label: 'Overview', icon: LayoutDashboard },
     { id: 'add-patient', label: 'Add Patient', icon: UserPlus },
     { id: 'manage-patients', label: 'Manage Patients', icon: Users },
+    { id: 'hospital-staff', label: 'Hospital Staff', icon: Stethoscope },
     { id: 'access-patient', label: 'Access Patient', icon: Shield },
     { id: 'search-fingerprint', label: 'Search by Fingerprint', icon: Activity },
     { id: 'search-blood-group', label: 'Search by Blood Group', icon: Heart },
@@ -42,7 +44,7 @@ const Sidebar = ({ activeTab, setActiveTab, userType }) => {
       animate={{ x: 0 }}
       className="w-64 bg-white shadow-lg h-screen fixed left-0 top-0 z-40"
     >
-      <div className="p-6">
+      <div className="p-6 h-full overflow-y-auto">
         {/* Logo */}
         <div className="flex items-center space-x-3 mb-8">
           <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center">

@@ -17,7 +17,8 @@ import {
   Image as ImageIcon,
   X,
   User,
-  AlertTriangle
+  AlertTriangle,
+  Stethoscope
 } from 'lucide-react'
 import { useAuth } from '../../hooks/useAuth'
 import Sidebar from '../../components/Sidebar'
@@ -25,7 +26,7 @@ import Table from '../../components/Table'
 import Modal from '../../components/Modal'
 import FormInput from '../../components/FormInput'
 import toast from 'react-hot-toast'
-import { collection, getDocs, doc, setDoc, updateDoc, query, where, orderBy, arrayUnion } from 'firebase/firestore'
+import { collection, getDocs, doc, setDoc, updateDoc, deleteDoc, query, where, arrayUnion } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { updatePassword } from 'firebase/auth'
 import { auth } from '../../firebase/config'
@@ -105,12 +106,39 @@ const HospitalDashboard = () => {
     patientPrivacyPermission: '',
     patientImage: null
   })
+  // Hospital staff (doctors) state
+  const [doctors, setDoctors] = useState([])
+  const [doctorsLoading, setDoctorsLoading] = useState(true)
+  const [showAddDoctorModal, setShowAddDoctorModal] = useState(false)
+  const [doctorForm, setDoctorForm] = useState({
+    name: '',
+    profilePhoto: null,
+    yearsOfExperience: '',
+    post: '',
+    qualifications: '',
+    email: '',
+    phone: ''
+  })
+  const [doctorPhotoPreview, setDoctorPhotoPreview] = useState(null)
+  const [isAddingDoctor, setIsAddingDoctor] = useState(false)
+  const [selectedDoctor, setSelectedDoctor] = useState(null)
+  const [showEditDoctorModal, setShowEditDoctorModal] = useState(false)
+  const [isUpdatingDoctor, setIsUpdatingDoctor] = useState(false)
+  const doctorFormRef = useRef(null)
+  const doctorImageInputRef = useRef(null)
+  const editDoctorImageInputRef = useRef(null)
   
   const { userData, createLog } = useAuth()
 
   useEffect(() => {
+    if (!userData?.hospitalId) {
+      setLoading(false)
+      setDoctorsLoading(false)
+      return
+    }
     fetchPatients()
-  }, [])
+    fetchDoctors()
+  }, [userData?.hospitalId])
 
   const fetchPatients = async () => {
     if (userData?.isDisabled) {
@@ -124,7 +152,6 @@ const HospitalDashboard = () => {
       const patientsQuery = query(
         collection(db, 'patient'),
         where('addedBy', '==', userData?.hospitalId || ''),
-        orderBy('createdAt', 'desc')
       )
       const patientsSnapshot = await getDocs(patientsQuery)
       const patientsData = patientsSnapshot.docs.map(doc => ({
@@ -138,6 +165,218 @@ const HospitalDashboard = () => {
     } finally {
       setLoading(false)
     }
+  }
+
+  const fetchDoctors = async () => {
+    if (userData?.isDisabled) {
+      setDoctorsLoading(false)
+      return
+    }
+    setDoctorsLoading(true)
+    try {
+      const doctorsQuery = query(
+        collection(db, 'doctor'),
+        where('addedBy', '==', userData?.hospitalId || ''),
+      )
+      const doctorsSnapshot = await getDocs(doctorsQuery)
+      const doctorsData = doctorsSnapshot.docs.map(d => ({
+        id: d.id,
+        ...d.data()
+      }))
+      setDoctors(doctorsData)
+    } catch (error) {
+      console.error('Error fetching doctors:', error)
+      toast.error('Failed to fetch doctors')
+    } finally {
+      setDoctorsLoading(false)
+    }
+  }
+
+  const handleAddDoctor = async (e) => {
+    e.preventDefault()
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. Please contact administrator.')
+      return
+    }
+    const name = doctorForm.name?.trim()
+    const post = doctorForm.post?.trim()
+    const yearsOfExperience = Number(doctorForm.yearsOfExperience)
+    if (!name) {
+      toast.error('Please enter doctor name')
+      return
+    }
+    if (!post) {
+      toast.error('Please enter post/designation')
+      return
+    }
+    if (doctorForm.yearsOfExperience === '' || isNaN(yearsOfExperience) || yearsOfExperience < 0) {
+      toast.error('Please enter a valid years of experience')
+      return
+    }
+    setIsAddingDoctor(true)
+    try {
+      const doctorId = Date.now().toString()
+      const currentTime = new Date().toISOString()
+      const qualificationsArray = doctorForm.qualifications
+        ? doctorForm.qualifications.split(',').map(q => q.trim()).filter(Boolean)
+        : []
+      const newDoctor = {
+        doctorId,
+        addedBy: userData.hospitalId,
+        name,
+        profilePhoto: doctorForm.profilePhoto || null,
+        yearsOfExperience,
+        post,
+        qualifications: qualificationsArray,
+        email: doctorForm.email?.trim() || '',
+        phone: doctorForm.phone?.trim() || '',
+        createdAt: currentTime,
+        updatedAt: currentTime
+      }
+      await setDoc(doc(db, 'doctor', doctorId), newDoctor)
+      await createLog({
+        hospitalId: userData.hospitalId,
+        action: 'ADD_DOCTOR',
+        remarks: `Added doctor: ${name} (${post})`
+      })
+      toast.success('Doctor added successfully!')
+      setShowAddDoctorModal(false)
+      resetDoctorForm()
+      fetchDoctors()
+    } catch (error) {
+      console.error('Error adding doctor:', error)
+      toast.error('Failed to add doctor')
+    } finally {
+      setIsAddingDoctor(false)
+    }
+  }
+
+  const resetDoctorForm = () => {
+    setDoctorForm({
+      name: '',
+      profilePhoto: null,
+      yearsOfExperience: '',
+      post: '',
+      qualifications: '',
+      email: '',
+      phone: ''
+    })
+    setDoctorPhotoPreview(null)
+    if (doctorFormRef.current) doctorFormRef.current.reset()
+    if (doctorImageInputRef.current) doctorImageInputRef.current.value = ''
+    if (editDoctorImageInputRef.current) editDoctorImageInputRef.current.value = ''
+  }
+
+  const handleEditDoctorClick = (doctor) => {
+    setSelectedDoctor(doctor)
+    setDoctorForm({
+      name: doctor.name || '',
+      profilePhoto: doctor.profilePhoto || null,
+      yearsOfExperience: doctor.yearsOfExperience !== undefined && doctor.yearsOfExperience !== null ? String(doctor.yearsOfExperience) : '',
+      post: doctor.post || '',
+      qualifications: Array.isArray(doctor.qualifications) ? doctor.qualifications.join(', ') : (doctor.qualifications || ''),
+      email: doctor.email || '',
+      phone: doctor.phone || ''
+    })
+    setDoctorPhotoPreview(doctor.profilePhoto || null)
+    setShowEditDoctorModal(true)
+  }
+
+  const handleUpdateDoctor = async (e) => {
+    e.preventDefault()
+    if (!selectedDoctor) return
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. Please contact administrator.')
+      return
+    }
+    const name = doctorForm.name?.trim()
+    const post = doctorForm.post?.trim()
+    const yearsOfExperience = Number(doctorForm.yearsOfExperience)
+    if (!name) {
+      toast.error('Please enter doctor name')
+      return
+    }
+    if (!post) {
+      toast.error('Please enter post/designation')
+      return
+    }
+    if (doctorForm.yearsOfExperience === '' || isNaN(yearsOfExperience) || yearsOfExperience < 0) {
+      toast.error('Please enter a valid years of experience')
+      return
+    }
+    setIsUpdatingDoctor(true)
+    try {
+      const doctorId = selectedDoctor.doctorId || selectedDoctor.id
+      const currentTime = new Date().toISOString()
+      const qualificationsArray = doctorForm.qualifications
+        ? doctorForm.qualifications.split(',').map(q => q.trim()).filter(Boolean)
+        : []
+      const updatedData = {
+        name,
+        profilePhoto: doctorForm.profilePhoto || null,
+        yearsOfExperience,
+        post,
+        qualifications: qualificationsArray,
+        email: doctorForm.email?.trim() || '',
+        phone: doctorForm.phone?.trim() || '',
+        updatedAt: currentTime
+      }
+      await updateDoc(doc(db, 'doctor', doctorId), updatedData)
+      await createLog({
+        hospitalId: userData.hospitalId,
+        action: 'UPDATE_DOCTOR',
+        remarks: `Updated doctor: ${name} (${post})`
+      })
+      toast.success('Doctor updated successfully!')
+      setShowEditDoctorModal(false)
+      setSelectedDoctor(null)
+      resetDoctorForm()
+      fetchDoctors()
+    } catch (error) {
+      console.error('Error updating doctor:', error)
+      toast.error('Failed to update doctor')
+    } finally {
+      setIsUpdatingDoctor(false)
+    }
+  }
+
+  const handleDeleteDoctor = async (doctor) => {
+    if (userData?.isDisabled) {
+      toast.error('Your hospital account is disabled. Please contact administrator.')
+      return
+    }
+    if (!window.confirm(`Remove doctor "${doctor.name}" from staff list?`)) return
+    try {
+      const doctorId = doctor.doctorId || doctor.id
+      await deleteDoc(doc(db, 'doctor', doctorId))
+      await createLog({
+        hospitalId: userData.hospitalId,
+        action: 'DELETE_DOCTOR',
+        remarks: `Removed doctor: ${doctor.name} (${doctor.post})`
+      })
+      toast.success('Doctor removed')
+      fetchDoctors()
+    } catch (error) {
+      console.error('Error deleting doctor:', error)
+      toast.error('Failed to remove doctor')
+    }
+  }
+
+  const handleDoctorPhotoChange = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select an image file')
+      return
+    }
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setDoctorForm(prev => ({ ...prev, profilePhoto: reader.result }))
+      setDoctorPhotoPreview(reader.result)
+      toast.success('Photo selected')
+    }
+    reader.onerror = () => toast.error('Failed to read image')
+    reader.readAsDataURL(file)
   }
 
   const handleAddPatient = async (patientData, formElement) => {
@@ -1398,13 +1637,19 @@ const HospitalDashboard = () => {
       }).length,
       icon: UserPlus,
       color: 'from-green-500 to-green-600'
+    },
+    {
+      title: 'Total Doctors',
+      value: doctors.length,
+      icon: Stethoscope,
+      color: 'from-teal-500 to-teal-600'
     }
   ]
 
   const renderOverview = () => (
     <div className="space-y-6">
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat, index) => {
           const Icon = stat.icon
           return (
@@ -2808,6 +3053,99 @@ const HospitalDashboard = () => {
     </div>
   )
 
+  const doctorColumns = [
+    {
+      header: 'Photo',
+      key: 'profilePhoto',
+      render: (value) => (
+        <div className="flex items-center justify-center">
+          {value ? (
+            <img
+              src={value}
+              alt="Doctor"
+              className="w-10 h-10 rounded-full object-cover border-2 border-gray-200"
+            />
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center">
+              <User className="w-5 h-5 text-gray-400" />
+            </div>
+          )}
+        </div>
+      )
+    },
+    { header: 'Name', key: 'name' },
+    { header: 'Post', key: 'post' },
+    {
+      header: 'Years of Experience',
+      key: 'yearsOfExperience',
+      render: (value) => (value !== undefined && value !== null ? `${value} yrs` : '-')
+    },
+    {
+      header: 'Qualifications',
+      key: 'qualifications',
+      render: (value) => (Array.isArray(value) ? value.join(', ') : value || '-')
+    },
+    {
+      header: 'Actions',
+      key: 'actions',
+      render: (_, row) => (
+        <div className="flex space-x-2">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleEditDoctorClick(row)
+            }}
+            className="p-1 text-green-600 hover:bg-green-100 rounded transition-colors"
+            title="Edit doctor"
+          >
+            <Edit className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              handleDeleteDoctor(row)
+            }}
+            className="p-1 text-red-600 hover:bg-red-100 rounded transition-colors"
+            title="Remove from staff"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      )
+    }
+  ]
+
+  const renderHospitalStaff = () => (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl p-6 shadow-lg">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-800">Hospital Staff</h3>
+            <p className="text-sm text-gray-500 mt-1">Add and manage doctors at your hospital</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAddDoctorModal(true)}
+            disabled={userData?.isDisabled}
+            className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-teal-500 to-teal-600 text-white rounded-lg font-medium shadow hover:shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <UserPlus className="w-5 h-5" />
+            <span>Add Doctor</span>
+          </button>
+        </div>
+
+        <Table
+          data={doctors}
+          columns={doctorColumns}
+          loading={doctorsLoading}
+          emptyMessage="No doctors added yet. Click Add Doctor to get started."
+        />
+      </div>
+    </div>
+  )
+
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':
@@ -2816,6 +3154,8 @@ const HospitalDashboard = () => {
         return renderAddPatient()
       case 'manage-patients':
         return renderManagePatients()
+      case 'hospital-staff':
+        return renderHospitalStaff()
       case 'access-patient':
         return renderAccessPatient()
       case 'search-fingerprint':
@@ -3410,6 +3750,298 @@ const HospitalDashboard = () => {
             </form>
           </div>
         )}
+      </Modal>
+
+      {/* Add Doctor Modal */}
+      <Modal
+        isOpen={showAddDoctorModal}
+        onClose={() => {
+          setShowAddDoctorModal(false)
+          resetDoctorForm()
+        }}
+        title="Add Doctor"
+        size="lg"
+      >
+        <form ref={doctorFormRef} onSubmit={handleAddDoctor} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormInput
+              label="Name"
+              name="name"
+              type="text"
+              value={doctorForm.name}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="Doctor full name"
+              required
+            />
+            <FormInput
+              label="Post / Designation"
+              name="post"
+              type="text"
+              value={doctorForm.post}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, post: e.target.value }))}
+              placeholder="e.g. Consultant, Senior Resident"
+              required
+            />
+            <FormInput
+              label="Years of Experience"
+              name="yearsOfExperience"
+              type="number"
+              min="0"
+              value={doctorForm.yearsOfExperience}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, yearsOfExperience: e.target.value }))}
+              placeholder="0"
+              required
+            />
+            <FormInput
+              label="Qualifications (comma-separated)"
+              name="qualifications"
+              type="text"
+              value={doctorForm.qualifications}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, qualifications: e.target.value }))}
+              placeholder="e.g. MBBS, MD, DM"
+            />
+            <FormInput
+              label="Email"
+              name="email"
+              type="email"
+              value={doctorForm.email}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, email: e.target.value }))}
+              placeholder="Optional"
+            />
+            <FormInput
+              label="Phone"
+              name="phone"
+              type="text"
+              value={doctorForm.phone}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, phone: e.target.value }))}
+              placeholder="Optional"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Profile Photo</label>
+            <div className="flex items-center space-x-4">
+              {doctorPhotoPreview ? (
+                <div className="relative">
+                  <img
+                    src={doctorPhotoPreview}
+                    alt="Preview"
+                    className="w-20 h-20 rounded-full object-cover border-2 border-gray-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDoctorForm(prev => ({ ...prev, profilePhoto: null }))
+                      setDoctorPhotoPreview(null)
+                      if (doctorImageInputRef.current) doctorImageInputRef.current.value = ''
+                    }}
+                    className="absolute -top-1 -right-1 p-0.5 bg-red-500 text-white rounded-full hover:bg-red-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-gray-200 flex items-center justify-center">
+                  <User className="w-10 h-10 text-gray-400" />
+                </div>
+              )}
+              <div>
+                <input
+                  ref={doctorImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleDoctorPhotoChange}
+                  className="hidden"
+                  id="doctor-photo-input"
+                />
+                <label
+                  htmlFor="doctor-photo-input"
+                  className="inline-flex items-center space-x-2 px-3 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 text-sm"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  <span>{doctorPhotoPreview ? 'Change Photo' : 'Upload Photo'}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowAddDoctorModal(false)
+                resetDoctorForm()
+              }}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isAddingDoctor}
+              className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+            >
+              {isAddingDoctor ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Adding...</span>
+                </>
+              ) : (
+                <span>Add Doctor</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Doctor Modal */}
+      <Modal
+        isOpen={showEditDoctorModal}
+        onClose={() => {
+          setShowEditDoctorModal(false)
+          setSelectedDoctor(null)
+          resetDoctorForm()
+        }}
+        title="Edit Doctor"
+        size="lg"
+      >
+        <form onSubmit={handleUpdateDoctor} className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormInput
+              label="Name"
+              name="name"
+              type="text"
+              value={doctorForm.name}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, name: e.target.value }))}
+              placeholder="Doctor full name"
+              required
+            />
+            <FormInput
+              label="Post / Designation"
+              name="post"
+              type="text"
+              value={doctorForm.post}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, post: e.target.value }))}
+              placeholder="e.g. Consultant, Senior Resident"
+              required
+            />
+            <FormInput
+              label="Years of Experience"
+              name="yearsOfExperience"
+              type="number"
+              min="0"
+              value={doctorForm.yearsOfExperience}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, yearsOfExperience: e.target.value }))}
+              placeholder="0"
+              required
+            />
+            <FormInput
+              label="Qualifications (comma-separated)"
+              name="qualifications"
+              type="text"
+              value={doctorForm.qualifications}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, qualifications: e.target.value }))}
+              placeholder="e.g. MBBS, MD, DM"
+            />
+            <FormInput
+              label="Email"
+              name="email"
+              type="email"
+              value={doctorForm.email}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, email: e.target.value }))}
+              placeholder="Optional"
+            />
+            <FormInput
+              label="Phone"
+              name="phone"
+              type="text"
+              value={doctorForm.phone}
+              onChange={(e) => setDoctorForm(prev => ({ ...prev, phone: e.target.value }))}
+              placeholder="Optional"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Profile Photo</label>
+            <div className="flex items-center space-x-4">
+              {doctorPhotoPreview ? (
+                <div className="relative">
+                  <img
+                    src={doctorPhotoPreview}
+                    alt="Preview"
+                    className="w-20 h-20 rounded-full object-cover border-2 border-gray-200"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDoctorForm(prev => ({ ...prev, profilePhoto: null }))
+                      setDoctorPhotoPreview(null)
+                      if (editDoctorImageInputRef.current) editDoctorImageInputRef.current.value = ''
+                    }}
+                    className="absolute -top-1 -right-1 p-0.5 bg-red-500 text-white rounded-full hover:bg-red-600"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-gray-200 flex items-center justify-center">
+                  <User className="w-10 h-10 text-gray-400" />
+                </div>
+              )}
+              <div>
+                <input
+                  ref={editDoctorImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleDoctorPhotoChange}
+                  className="hidden"
+                  id="edit-doctor-photo-input"
+                />
+                <label
+                  htmlFor="edit-doctor-photo-input"
+                  className="inline-flex items-center space-x-2 px-3 py-2 border border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 text-sm"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  <span>{doctorPhotoPreview ? 'Change Photo' : 'Upload Photo'}</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex justify-end space-x-3 pt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setShowEditDoctorModal(false)
+                setSelectedDoctor(null)
+                resetDoctorForm()
+              }}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isUpdatingDoctor}
+              className="px-6 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+            >
+              {isUpdatingDoctor ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>Save Changes</span>
+              )}
+            </button>
+          </div>
+        </form>
       </Modal>
 
       {/* Password Change Modal */}
