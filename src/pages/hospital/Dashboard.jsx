@@ -384,6 +384,11 @@ const HospitalDashboard = () => {
       toast.error('Your hospital account is disabled. You cannot add new patients. Please contact administrator.')
       return
     }
+
+    if (fingerprintSlotNumber === null || fingerprintSlotNumber === undefined) {
+      toast.error('Fingerprint enrollment is required before adding patient')
+      return
+    }
     
     setIsAddingPatient(true)
     try {
@@ -453,24 +458,31 @@ const HospitalDashboard = () => {
       toast.error('Your hospital account is disabled. You cannot add new patients. Please contact administrator.')
       return
     }
-    
-    if (!addPatientAadhar || addPatientAadhar.trim().length !== 12) {
-      toast.error('Please enter a valid 12-digit Aadhaar number')
-      return
-    }
 
     setIsSearchingAadhar(true)
     try {
+      toast.loading('Please place your finger on the scanner...', { id: 'add-patient-search' })
+
+      const response = await searchFingerprint()
+      if (!response.success || response.slot_number === null) {
+        setShowRegistrationForm(true)
+        setFoundPatientForAdd(null)
+        setAddPatientAadhar('')
+        toast.success('Fingerprint not found in records. Please register the patient as new.', { id: 'add-patient-search' })
+        return
+      }
+
       const patientsQuery = query(
         collection(db, 'patient'),
-        where('aadharNumber', '==', addPatientAadhar.trim())
+        where('fingerprintSlotNumber', '==', response.slot_number)
       )
       const patientsSnapshot = await getDocs(patientsQuery)
       
       if (patientsSnapshot.empty) {
-        // Patient doesn't exist - show registration form
         setShowRegistrationForm(true)
-        setIsSearchingAadhar(false)
+        setFoundPatientForAdd(null)
+        setAddPatientAadhar('')
+        toast.success('Fingerprint not found in records. Please register the patient as new.', { id: 'add-patient-search' })
         return
       }
 
@@ -480,14 +492,16 @@ const HospitalDashboard = () => {
         id: existingPatientDoc.id,
         ...existingPatientDoc.data()
       }
+      setShowRegistrationForm(false)
+      setAddPatientAadhar(existingPatient.aadharNumber || '')
       
       // Check if hospital already has access
       const hasAccess = existingPatient.associatedHospitals?.includes(userData.hospitalId) || 
                        existingPatient.addedBy === userData.hospitalId
       
       if (hasAccess) {
-        toast.error('You already have access to this patient')
-        setIsSearchingAadhar(false)
+        setFoundPatientForAdd(existingPatient)
+        toast.success('Patient found!', { id: 'add-patient-search' })
         return
       }
       
@@ -503,11 +517,9 @@ const HospitalDashboard = () => {
             patientData: existingPatient
           })
           setShowOtpModal(true)
-          setIsSearchingAadhar(false)
           // Auto-send OTP
           handleSendOtp(existingPatient.email)
-        } else {
-          setIsSearchingAadhar(false)
+          toast.success('Patient found. OTP sent for access verification.', { id: 'add-patient-search' })
         }
         return
       }
@@ -529,10 +541,11 @@ const HospitalDashboard = () => {
       } else {
         setFoundPatientForAdd(existingPatient)
       }
-      setIsSearchingAadhar(false)
+      toast.success('Patient found!', { id: 'add-patient-search' })
     } catch (error) {
-      console.error('Error searching Aadhaar:', error)
-      toast.error('Failed to search patient')
+      console.error('Error searching fingerprint for add patient:', error)
+      toast.error(error.message || 'Failed to search fingerprint. Please try again.', { id: 'add-patient-search' })
+    } finally {
       setIsSearchingAadhar(false)
     }
   }
@@ -1729,7 +1742,7 @@ const HospitalDashboard = () => {
       )
     }
     
-    // Step 1: Aadhaar Search (if patient not found and registration form not shown)
+    // Step 1: Fingerprint Search (if patient not found and registration form not shown)
     if (!showRegistrationForm && !foundPatientForAdd) {
       return (
         <div className="bg-white rounded-xl p-6 shadow-lg">
@@ -1737,29 +1750,14 @@ const HospitalDashboard = () => {
           <div className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
               <p className="text-sm text-blue-800">
-                <strong>Step 1:</strong> Enter the patient's Aadhaar number to check if they already exist in the system.
+                <strong>Step 1:</strong> Scan the patient's fingerprint to check if they already exist in the system.
               </p>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Aadhaar Number
-                <span className="text-red-500 ml-1">*</span>
-              </label>
-              <input
-                type="text"
-                value={addPatientAadhar}
-                onChange={(e) => setAddPatientAadhar(e.target.value.replace(/\D/g, '').slice(0, 12))}
-                placeholder="Enter 12-digit Aadhaar number"
-                maxLength={12}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              />
             </div>
             
             <button
               type="button"
               onClick={handleSearchAadharForAdd}
-              disabled={isSearchingAadhar || addPatientAadhar.length !== 12 || userData?.isDisabled}
+              disabled={isSearchingAadhar || userData?.isDisabled}
               className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
             >
               {isSearchingAadhar ? (
@@ -1768,12 +1766,12 @@ const HospitalDashboard = () => {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                   </svg>
-                  <span>Searching...</span>
+                  <span>Scanning...</span>
                 </>
               ) : (
                 <>
-                  <Search className="w-5 h-5" />
-                  <span>Search Patient</span>
+                  <Fingerprint className="w-5 h-5" />
+                  <span>Scan Fingerprint</span>
                 </>
               )}
             </button>
@@ -1795,7 +1793,7 @@ const HospitalDashboard = () => {
           
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
             <p className="text-sm text-green-800">
-              ✅ Patient with Aadhaar number <strong>{foundPatientForAdd.aadharNumber}</strong> exists in the system.
+              ✅ Patient matched by fingerprint. Aadhaar number <strong>{foundPatientForAdd.aadharNumber}</strong> exists in the system.
               {hasAccess ? ' You have access to this patient.' : ' Linking hospital...'}
             </p>
           </div>
@@ -1914,7 +1912,7 @@ const HospitalDashboard = () => {
         <h3 className="text-lg font-semibold text-gray-800 mb-6">Register New Patient</h3>
         <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
           <p className="text-sm text-yellow-800">
-            Patient with Aadhaar number <strong>{addPatientAadhar}</strong> not found. Please fill in the details to register a new patient.
+            Fingerprint not found in records. Please fill in the details to register a new patient.
           </p>
         </div>
         
@@ -1927,8 +1925,8 @@ const HospitalDashboard = () => {
           }}
           className="mb-4 text-blue-600 hover:text-blue-800 transition-colors flex items-center space-x-2"
         >
-          <Search className="w-4 h-4" />
-          <span>Search Again</span>
+          <Fingerprint className="w-4 h-4" />
+          <span>Scan Again</span>
         </button>
         
         <form 
@@ -1936,9 +1934,10 @@ const HospitalDashboard = () => {
           onSubmit={(e) => {
             e.preventDefault()
             const formData = new FormData(e.target)
+            const enteredAadhar = (formData.get('aadharNumber') || '').toString().replace(/\D/g, '').slice(0, 12)
             const patientData = {
               patientName: formData.get('patientName'),
-              aadharNumber: addPatientAadhar, // Use searched Aadhaar
+              aadharNumber: enteredAadhar,
               email: formData.get('email'),
               mobileNumber: formData.get('mobileNumber'),
               relativesNumber: formData.get('relativesNumber'),
@@ -1964,6 +1963,8 @@ const HospitalDashboard = () => {
             label="Aadhaar Number"
             name="aadharNumber"
             placeholder="Enter 12-digit Aadhaar number"
+            defaultValue={addPatientAadhar}
+            maxLength={12}
             required
           />
         </div>
@@ -2103,7 +2104,8 @@ const HospitalDashboard = () => {
         {/* Fingerprint Enrollment */}
         <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
           <label className="block text-sm font-medium text-gray-700 mb-3">
-            Fingerprint Enrollment (Optional)
+            Fingerprint Enrollment
+            <span className="text-red-500 ml-1">*</span>
           </label>
           <div className="flex items-center justify-between">
             <div className="flex-1">
@@ -2113,7 +2115,7 @@ const HospitalDashboard = () => {
                 </p>
               ) : (
                 <p className="text-sm text-gray-600">
-                  Register patient's fingerprint to enable quick search later
+                  Enroll patient's fingerprint to continue patient registration
                 </p>
               )}
             </div>
@@ -2143,7 +2145,7 @@ const HospitalDashboard = () => {
         
         <button
           type="submit"
-          disabled={isAddingPatient}
+          disabled={isAddingPatient || fingerprintSlotNumber === null || fingerprintSlotNumber === undefined}
           className="w-full bg-gradient-to-r from-blue-500 to-indigo-600 text-white py-3 px-6 rounded-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center space-x-2"
         >
           {isAddingPatient ? (
