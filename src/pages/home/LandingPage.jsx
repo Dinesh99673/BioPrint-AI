@@ -22,7 +22,7 @@ const LandingPage = () => {
     {
       icon: Target,
       title: 'High Accuracy',
-      description: '90% accuracy rate with dual model validation for reliable results',
+      description: '75% accuracy rate with dual model validation for reliable results',
       color: 'from-green-500 to-emerald-500'
     },
     {
@@ -61,7 +61,7 @@ const LandingPage = () => {
   ]
 
   const stats = [
-    { number: '90%', label: 'Accuracy Rate' },
+    { number: '75%', label: 'Accuracy Rate' },
     { number: '6K+', label: 'Fingerprint Samples' },
     { number: '2', label: 'AI Models' },
     { number: '< 5s', label: 'Detection Time' }

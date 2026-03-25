@@ -192,6 +192,28 @@ const HospitalDashboard = () => {
     }
   }
 
+  const getAllHospitalNotes = (patientData) => {
+    if (!patientData?.hospitalRecords) return []
+
+    const allNotes = []
+
+    Object.entries(patientData.hospitalRecords).forEach(([hospitalId, record]) => {
+      const notes = record?.notes || []
+      if (!Array.isArray(notes)) return
+
+      notes.forEach((note, index) => {
+        allNotes.push({
+          ...note,
+          hospitalId,
+          hospitalName: note?.hospitalName || hospitalId,
+          uniqueKey: `${hospitalId}-${note?.addedAt || index}-${index}`
+        })
+      })
+    })
+
+    return allNotes.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt))
+  }
+
   const handleAddDoctor = async (e) => {
     e.preventDefault()
     if (userData?.isDisabled) {
@@ -1783,7 +1805,7 @@ const HospitalDashboard = () => {
     // Step 2: Patient Found - Show Patient Data and Notes
     if (foundPatientForAdd) {
       const hospitalId = userData.hospitalId
-      const hospitalNotes = foundPatientForAdd.hospitalRecords?.[hospitalId]?.notes || []
+      const allHospitalNotes = getAllHospitalNotes(foundPatientForAdd)
       const hasAccess = foundPatientForAdd.associatedHospitals?.includes(hospitalId) || 
                        foundPatientForAdd.addedBy === hospitalId
       
@@ -1872,13 +1894,16 @@ const HospitalDashboard = () => {
           )}
 
           {/* Display Notes */}
-          {hasAccess && hospitalNotes.length > 0 && (
+          {hasAccess && allHospitalNotes.length > 0 && (
             <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
               <h4 className="text-md font-semibold text-gray-800 mb-4">Treatment Notes</h4>
               <div className="space-y-3 max-h-64 overflow-y-auto">
-                {hospitalNotes.map((note, index) => (
-                  <div key={index} className="bg-white rounded-lg p-3 border border-gray-200">
+                {allHospitalNotes.map((note) => (
+                  <div key={note.uniqueKey} className="bg-white rounded-lg p-3 border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-blue-700">
+                        {note.hospitalName}
+                      </span>
                       <span className="text-xs text-gray-500">
                         {new Date(note.addedAt).toLocaleString()}
                       </span>
@@ -2191,7 +2216,7 @@ const HospitalDashboard = () => {
       const hospitalId = userData.hospitalId
       const hasAccess = accessPatientData.associatedHospitals?.includes(hospitalId) || 
                        accessPatientData.addedBy === hospitalId
-      const hospitalNotes = accessPatientData.hospitalRecords?.[hospitalId]?.notes || []
+      const allHospitalNotes = getAllHospitalNotes(accessPatientData)
 
       return (
         <div className="bg-white rounded-xl p-6 shadow-lg">
@@ -2287,13 +2312,16 @@ const HospitalDashboard = () => {
           )}
 
           {/* Display Notes */}
-          {hasAccess && hospitalNotes.length > 0 && (
+          {hasAccess && allHospitalNotes.length > 0 && (
             <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
               <h4 className="text-md font-semibold text-gray-800 mb-4">Treatment Notes</h4>
               <div className="space-y-3 max-h-64 overflow-y-auto">
-                {hospitalNotes.map((note, index) => (
-                  <div key={index} className="bg-white rounded-lg p-3 border border-gray-200">
+                {allHospitalNotes.map((note) => (
+                  <div key={note.uniqueKey} className="bg-white rounded-lg p-3 border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-blue-700">
+                        {note.hospitalName}
+                      </span>
                       <span className="text-xs text-gray-500">
                         {new Date(note.addedAt).toLocaleString()}
                       </span>
@@ -2552,7 +2580,7 @@ const HospitalDashboard = () => {
     // Show patient details if found
     if (foundPatientByFingerprint) {
       const hospitalId = userData.hospitalId
-      const hospitalNotes = foundPatientByFingerprint.hospitalRecords?.[hospitalId]?.notes || []
+      const allHospitalNotes = getAllHospitalNotes(foundPatientByFingerprint)
       const hasAccess = foundPatientByFingerprint.associatedHospitals?.includes(hospitalId) || 
                        foundPatientByFingerprint.addedBy === hospitalId
 
@@ -2651,13 +2679,16 @@ const HospitalDashboard = () => {
           </div>
 
           {/* Display Notes */}
-          {hasAccess && hospitalNotes.length > 0 && (
+          {hasAccess && allHospitalNotes.length > 0 && (
             <div className="bg-gray-50 rounded-lg p-4 mb-6 border border-gray-200">
               <h4 className="text-md font-semibold text-gray-800 mb-4">Treatment Notes</h4>
               <div className="space-y-3 max-h-64 overflow-y-auto">
-                {hospitalNotes.map((note, index) => (
-                  <div key={index} className="bg-white rounded-lg p-3 border border-gray-200">
+                {allHospitalNotes.map((note) => (
+                  <div key={note.uniqueKey} className="bg-white rounded-lg p-3 border border-gray-200">
                     <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-blue-700">
+                        {note.hospitalName}
+                      </span>
                       <span className="text-xs text-gray-500">
                         {new Date(note.addedAt).toLocaleString()}
                       </span>
@@ -2838,7 +2869,7 @@ const HospitalDashboard = () => {
               <div className="bg-white rounded-lg p-4 shadow-md mb-4">
                 <p className="text-sm text-gray-600 mb-1">VGG16 Model</p>
                 <p className="text-3xl font-bold text-blue-600">{bloodGroupResult.vgg16?.blood_group || 'N/A'}</p>
-                <p className="text-sm text-gray-600 mt-1">
+                {/* <p className="text-sm text-gray-600 mt-1">
                   Confidence: {bloodGroupResult.vgg16?.confidence ?? 0}%
                 </p>
                 <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
@@ -2846,7 +2877,7 @@ const HospitalDashboard = () => {
                     className="bg-blue-500 h-2 rounded-full transition-all duration-1000"
                     style={{ width: `${bloodGroupResult.vgg16?.confidence ?? 0}%` }}
                   ></div>
-                </div>
+                </div> */}
               </div>
               <button
                 onClick={() => {

@@ -2,7 +2,9 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Building2, Heart } from 'lucide-react'
+import { sendPasswordResetEmail } from 'firebase/auth'
 import { useAuth } from '../../hooks/useAuth'
+import { auth } from '../../firebase/config'
 import FormInput from '../../components/FormInput'
 import toast from 'react-hot-toast'
 
@@ -12,7 +14,11 @@ const HospitalLogin = () => {
     password: ''
   })
   const [loading, setLoading] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
   const [errors, setErrors] = useState({})
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [resetEmail, setResetEmail] = useState('')
+  const [resetError, setResetError] = useState('')
   
   const { login } = useAuth()
   const navigate = useNavigate()
@@ -69,6 +75,53 @@ const HospitalLogin = () => {
     }
   }
 
+  const getResetPasswordError = (error) => {
+    switch (error?.code) {
+      case 'auth/invalid-email':
+        return 'Please enter a valid email address.'
+      case 'auth/user-not-found':
+        return 'No account was found with this email address.'
+      case 'auth/missing-email':
+        return 'Email is required to reset password.'
+      case 'auth/too-many-requests':
+        return 'Too many attempts. Please try again later.'
+      default:
+        return 'Failed to send reset email. Please try again.'
+    }
+  }
+
+  const handleForgotPasswordClick = () => {
+    setShowForgotPassword(true)
+    setResetError('')
+    setResetEmail(formData.email || '')
+  }
+
+  const handleSendResetEmail = async () => {
+    const emailToReset = resetEmail.trim()
+    if (!emailToReset) {
+      setResetError('Email is required')
+      return
+    }
+    if (!/\S+@\S+\.\S+/.test(emailToReset)) {
+      setResetError('Please enter a valid email address')
+      return
+    }
+
+    setResetLoading(true)
+    setResetError('')
+    try {
+      await sendPasswordResetEmail(auth, emailToReset)
+      toast.success('Password reset email sent. Please check your inbox.')
+      setShowForgotPassword(false)
+      setResetEmail('')
+    } catch (error) {
+      console.error('Reset password error:', error)
+      setResetError(getResetPasswordError(error))
+    } finally {
+      setResetLoading(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center p-4">
       <motion.div
@@ -120,6 +173,58 @@ const HospitalLogin = () => {
               error={errors.password}
               required
             />
+
+            <div className="text-right">
+              <button
+                type="button"
+                onClick={handleForgotPasswordClick}
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Forgot Password?
+              </button>
+            </div>
+
+            {showForgotPassword && (
+              <div className="rounded-lg border border-blue-100 bg-blue-50 p-4 space-y-3">
+                <label className="block text-sm font-medium text-gray-700">
+                  Reset Email
+                </label>
+                <input
+                  type="email"
+                  value={resetEmail}
+                  onChange={(e) => {
+                    setResetEmail(e.target.value)
+                    if (resetError) setResetError('')
+                  }}
+                  placeholder="Enter your email"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                {resetError && (
+                  <p className="text-sm text-red-500">{resetError}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSendResetEmail}
+                    disabled={resetLoading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {resetLoading ? 'Sending...' : 'Send Reset Link'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForgotPassword(false)
+                      setResetError('')
+                    }}
+                    disabled={resetLoading}
+                    className="bg-white text-gray-700 px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
 
             <motion.button
               whileHover={{ scale: 1.02 }}

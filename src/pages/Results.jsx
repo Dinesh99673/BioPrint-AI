@@ -207,7 +207,7 @@ const Results = () => {
               <div className="text-6xl font-bold text-blue-600 mb-2">
                 {predictions.vgg16?.blood_group ?? 'N/A'}
               </div>
-              <div className="text-2xl font-semibold text-gray-700 mb-4">
+              {/* <div className="text-2xl font-semibold text-gray-700 mb-4">
                 {predictions.vgg16?.confidence ?? 0}% Confidence
               </div>
               <div className="w-full bg-gray-200 rounded-full h-3 mb-4">
@@ -215,7 +215,7 @@ const Results = () => {
                   className="bg-gradient-to-r from-blue-500 to-cyan-500 h-3 rounded-full transition-all duration-1000"
                   style={{ width: `${predictions.vgg16?.confidence ?? 0}%` }}
                 ></div>
-              </div>
+              </div> */}
             </div>
           </motion.div>
         </motion.div>
